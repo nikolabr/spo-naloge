@@ -14,7 +14,7 @@ PROG	START	0
 	RMO	X, A
 	MULR	S, A
 	STA	PROD
-
+	
 	RMO	X, A
 	DIVR	S, A
 	STA	QUOT

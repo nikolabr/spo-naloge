@@ -1,0 +1,37 @@
+primer	START	0
+
+PROG	CLEAR	X
+	CLEAR	A
+	LDS	#1
+	
+LOOP	RMO	S, A
+	MUL	P, X
+	ADD	TOTAL
+	STA	TOTAL
+	
+	RMO	S, A
+	MUL	x
+	RMO	A, S
+	
+	TIX	#N
+	TIX	#N
+	TIX	#N
+	
+	JLT	LOOP
+
+HALT	J	HALT	
+	
+x	WORD	2	
+
+P	WORD	5
+	WORD	4
+	WORD	3
+	WORD	2
+	WORD	1
+
+PN	EQU	*
+N	EQU	PN - P
+
+TOTAL	WORD	0
+	
+	END PROG
