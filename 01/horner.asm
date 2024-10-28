@@ -2,7 +2,7 @@ primer	START	0
 
 PROG	CLEAR	A
 	CLEAR	X
-	
+
 	LDX	#N
 	
 LOOP	
