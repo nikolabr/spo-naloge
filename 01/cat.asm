@@ -1,0 +1,9 @@
+primer	START	0
+
+PROG	RD	#0
+	WD	#1
+	J	PROG
+
+HALT	J	HALT
+
+	END	PROG
