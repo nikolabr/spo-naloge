@@ -34,14 +34,6 @@
     (and (file-stream-port? device-port) (close-output-port device-port))
     res))
 
-(define (error-not-implemented)
-  (error "Not implemented"))
-
-(define (error-invalid-opcode opcode)
-  (error "Invalid opcode"))
-
-(define (error-invalid-addressing) (error "Invalid addressing"))
-
 (define reg-mask #xFFFFFF)
 
 ;; F2
@@ -82,6 +74,8 @@
   #x48)
 (define op-lda
   #x00)
+(define op-ldb
+  #x68)
 (define op-ldch
   #x50)
 (define op-ldl
@@ -167,22 +161,21 @@
     (super-new)
 
     (define regs
-      (list
-       (list 'a 0)
-       (list 'x 0)
-       (list 'l 0)
-       (list 'b 0)
-       (list 's 0)
-       (list 't 0)
-       (list 'f 0)
-       (list 'pc 0)
-       (list 'sw 0)))
+      '((a . 0)
+        (x . 0)
+        (l . 0)
+        (b . 0)
+        (s . 0)
+        (t . 0)
+        (f . 0)
+        (pc . 0)
+        (sw . 0)))
 
     (define mem-size 128)
     (define mem (make-vector mem-size))
 
     (define/public (get-reg reg)
-      (assoc reg regs))
+      (dict-ref regs reg))
 
     (define/public (set-reg reg word)
       (let ([masked-word (bitwise-and word reg-mask)])
@@ -203,12 +196,12 @@
       (vector-set! mem addr val))
     
     (define/public (write-word-at addr val) 
-      (let ([b (word-to-bytes val)]
-            [l (build-list 3)])
-        (map
-         (lambda (i) (write-byte-at
-                      (+ addr i)
-                      (list-ref b i))) l)))
+      (let*
+          ([b (word-to-bytes val)]
+           [l (build-list 3 (lambda (i) (write-byte-at
+                                         (+ addr i)
+                                         (list-ref b i))))])
+        l))
     
     (define/public (fetch)
       (let* ([old-pc (get-reg 'pc)]
@@ -217,24 +210,31 @@
         val))
 
     ;; Return immediate value or call f with the effective address if not immediate
-    (define/public (call-with-effective-addr addr f nixbpe-bits)
-      (let (
-            ;; Fix address
-            [fixed-addr
-             (match nixbpe-bits
-               [(nixbpe 0 0 _ _ _ _) addr]
-               [(nixbpe _ _ _ _ _ 1) (bitwise-ior (arithmetic-shift addr 8) (fetch))]
-               [_ (bitwise-and addr #x3FF)])
-             ])
+    (define/public (call-effective addr f nixbpe-bits)
+      (let* (
+             ;; Fix address
+             [is-e-format
+              (match nixbpe-bits
+                [(nixbpe _ _ _ _ _ 1) #t]
+                [_ #f])]
+             [fixed-addr
+              (if is-e-format
+                  (bitwise-ior (arithmetic-shift addr 8) (fetch))
+                  (bitwise-and addr #x3FF))
+              ]
+             [pc-val (get-reg 'pc)])
+        
+        ;; (print nixbpe-bits)
+
         (match nixbpe-bits
           ;; Simple
           [(nixbpe 1 1 0 0 0 _) (f fixed-addr)]
           
-          [(nixbpe 1 1 0 0 1 0) (f (+ fixed-addr (get-reg 'pc)))]
+          [(nixbpe 1 1 0 0 1 0) (f (+ fixed-addr pc-val))]
           [(nixbpe 1 1 0 1 0 0) (f (+ fixed-addr (get-reg 'b)))]
           [(nixbpe 1 1 1 0 0 _) (f (+ fixed-addr (get-reg 'x)))]
-
-          [(nixbpe 1 1 1 0 1 0) (f (apply + fixed-addr (get-reg 'x) (get-reg 'pc)))]
+          
+          [(nixbpe 1 1 1 0 1 0) (f (apply + fixed-addr (get-reg 'x) pc-val))]
           [(nixbpe 1 1 1 1 0 0) (f (apply + fixed-addr (get-reg 'x) (get-reg 'b)))]
 
           [(nixbpe 0 0 0 _ _ _) (f fixed-addr)]
@@ -242,18 +242,18 @@
           
           ;; Indirect
           [(nixbpe 1 0 0 0 0 _) (f (read-word-at fixed-addr))]
-          [(nixbpe 1 0 0 0 1 0) (f (+ (read-word-at fixed-addr) (get-reg 'pc)))]
+          [(nixbpe 1 0 0 0 1 0) (f (+ (read-word-at fixed-addr) pc-val))]
           [(nixbpe 1 0 0 1 0 0) (f (+ (read-word-at fixed-addr) (get-reg 'b)))]
 
           ;; Immediate
           [(nixbpe 0 1 0 0 0 _) fixed-addr]
-          [(nixbpe 0 1 0 0 1 _) (+ fixed-addr (get-reg 'pc))]
+          [(nixbpe 0 1 0 0 1 _) (+ fixed-addr pc-val)]
           [(nixbpe 0 1 0 0 0 _) (+ fixed-addr (get-reg 'b))]
           
           [_ (error "Invalid addressing mode")])))
 
-    (define (execute-f1 opcode) (error-not-implemented))
-
+    (define (execute-f1 opcode) (error "F1 opcodes not implemented!"))
+    
     (define (execute-f2 opcode)
       (let* ([operand (fetch)]
              [r1 (bitwise-bit-field operand 4 8)]
@@ -264,13 +264,59 @@
         (match opcode
           [(== op-addr) (set-reg-index r1 (+ r1-val r2-val))]
           [(== op-clear) (set-reg-index r1 0)]
-          [(== op-compr) (error-not-implemented)]
+          [(== op-compr) (error "COMPR not implemented!")]
           [(== op-divr) (set-reg-index r1 (quotient r1-val r2-val))]
           [(== op-mulr) (set-reg-index r1 (* r1-val r2-val))]
           [(== op-rmo) (set-reg-index r1 r2-val)]
           [(== op-shiftl) (set-reg-index r1 (arithmetic-shift r1-val r2))]
           [(== op-shiftl) (set-reg-index r1 (arithmetic-shift r1-val (- r2)))]
-          [_ (error-not-implemented)])))
+          [_ (error "Unknown F2 opcode")])))
+    
+    (define (execute-comp reg offset nixbpe-bits)
+      (let* ([read-f (lambda (addr) (read-word-at addr))]
+             [r (get-reg reg)]
+             [val (call-effective offset read-f nixbpe-bits)])
+        (cond
+          [(< r val) (set-reg 'sw #x00)]
+          [(eq? r val) (set-reg 'sw #x40)]
+          [(> r val) (set-reg 'sw #x80)])))
+
+    ;; Arithmetic functions
+    (define (execute-arith offset nixbpe-bits f)
+      (let* ([a (get-reg 'a)]
+             [read-f (lambda (addr) (read-word-at addr))]
+             [res (f a (call-effective offset read-f nixbpe-bits))])
+        (set-reg 'a res)))
+
+    (define (execute-ldch offset nixbpe-bits)
+      (let ([read-f (lambda (addr) (read-byte-at addr))])
+        (set-reg 'a (call-effective offset read-f nixbpe-bits))))
+
+    (define (execute-load reg offset nixbpe-bits)
+      (let ([read-f (lambda (addr) (read-word-at addr))])
+        (set-reg reg (call-effective offset read-f nixbpe-bits))))
+
+    (define (execute-store reg offset nixbpe-bits)
+      (let* ([val (get-reg reg)]
+             [write-f (lambda (addr) (write-word-at addr val))]
+             )
+        (call-effective offset write-f nixbpe-bits)))
+
+    (define (execute-rd offset nixbpe-bits)
+      (let* ([read-f (lambda (addr) (read-byte-at addr))]
+             [device-id (call-effective offset read-f nixbpe-bits)]
+             [res (read-machine-device device-id)])
+        (set-reg 'a res)))
+
+    (define (execute-wd offset nixbpe-bits)
+      (let* ([read-f (lambda (addr) (read-byte-at addr))]
+             [device-id (call-effective offset read-f nixbpe-bits)]
+             [b (bitwise-and (get-reg 'a) #xFF)])
+        (write-machine-device device-id b)))
+
+    (define (execute-tix offset nixbpe-bits)
+      (set-reg 'x (+ (get-reg 'x) 1))
+      (execute-comp 'x offset nixbpe-bits))
 
     (define (execute-sic-f3-f4 opcode)
       (let* ([instr-word (bytes-to-word (list opcode (fetch) (fetch)))]
@@ -278,15 +324,83 @@
              [offset (bitwise-and instr-word #x7FFF)]
              )
         (match opcode
-          [_ (error-not-implemented)])))
+          [op-add (execute-arith offset nixbpe-bits +)]
+          [op-and (execute-arith offset nixbpe-bits bitwise-and)]
+          [op-comp (execute-comp 'a offset nixbpe-bits)]
+          [op-div (execute-arith offset nixbpe-bits quotient)]
+
+          ;; TODO implement jumps
+
+          [op-ldch (execute-ldch)]
+          [op-lda (execute-load 'a offset nixbpe-bits)]
+          [op-ldb (execute-load 'b offset nixbpe-bits)]
+          [op-ldl (execute-load 'l offset nixbpe-bits)]
+          [op-lds (execute-load 's offset nixbpe-bits)]
+          [op-ldt (execute-load 't offset nixbpe-bits)]
+          [op-ldx (execute-load 'x offset nixbpe-bits)]
+
+          [op-rd (execute-rd offset nixbpe-bits)]
+          [op-rsub (set-reg 'pc (get-reg 'l))]
+          
+          [op-mul (execute-arith offset nixbpe-bits *)]
+          [op-or (execute-arith offset nixbpe-bits bitwise-ior)]
+          [op-sub (execute-arith offset nixbpe-bits -)]
+
+          [op-td (error "TD not implemented")]
+          [op-tix (execute-tix offset nixbpe-bits)]
+          [op-wd (execute-wd offset nixbpe-bits)]
+          
+          [_ (error "SIC opcode not implemented!")])))
     
     (define/public (execute)
-      (let* ([opcode (fetch)]
+      (let* ([b (fetch)]
+             [opcode (bitwise-and b #xFC)]
+             [pc-val (+ (get-reg 'pc) -1)]
              [f (cond
                   [(member opcode f2-opcodes) execute-f2]
                   [(member opcode sic-opcodes) execute-sic-f3-f4]
-                  [#t (error-not-implemented)])])
-        (f opcode)))
+                  [else (error (format "Invalid opcode: ~a at ~a" opcode pc-val))]
+                  )])
+        ;; (print (format "PC: ~a, opcode: ~a" pc-val opcode))
+        (f b)))
     ))
 
 (define (create-default-machine) (new machine%))
+
+(module+ test
+  (require rackunit)
+  (check-equal? (send* (new machine%)
+                  (write-word-at 0 #x00DEAD)
+                  (read-word-at 0))
+                #x00DEAD)
+  
+  ;; Test basic LDA
+  (check-equal? (send* (new machine%)
+                  ;; 	LDA   	V
+                  ;; V	WORD	123
+                  (write-word-at 0 #x032000)
+                  (write-word-at 3 123)
+
+                  (execute)
+                  (get-reg 'a))
+               123)
+
+  ;; Test immediate
+  (check-equal? (send* (new machine%)
+                  (write-word-at 0 #x01007B)
+                  (execute)
+                  (get-reg 'a))
+                123)
+  
+  ;; Test store then load
+  (check-equal? (send* (new machine%)
+                  (write-word-at 0 #x01007B)
+                  ;; (write-word-at 3 #x0F2006)
+                  (write-word-at 3 #x010000)
+                  
+                  (execute)
+                  (execute)
+                  
+                  (get-reg 'a))
+                123)  
+  )
