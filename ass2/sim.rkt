@@ -1,5 +1,7 @@
 #lang racket
 
+(require "loader.rkt")
+
 (define (word-to-bytes word)
   (let ([offsets (list 16 8 0)]
         [f (lambda (arg) (bitwise-bit-field word arg (+ arg 8)))])
@@ -100,8 +102,12 @@
   #x54)
 (define op-stl
   #x14)
+(define op-sts
+  #x7C)
 (define op-stsw
   #xE8)
+(define op-stt
+  #x84)
 (define op-stx
   #x10)
 (define op-sub
@@ -135,8 +141,10 @@
         op-rsub
         op-sta 
         op-stch
-        op-stl 
+        op-stl
+        op-sts
         op-stsw
+        op-stt
         op-stx 
         op-sub 
         op-td  
@@ -302,6 +310,11 @@
              )
         (call-effective offset write-f nixbpe-bits)))
 
+    (define (execute-stch offset nixbpe-bits)
+      (let* ([a (get-reg 'a)]
+             [write-f (lambda (addr) (write-byte-at addr))])
+        (call-effective offset write-f nixbpe-bits)))
+
     (define (execute-rd offset nixbpe-bits)
       (let* ([read-f (lambda (addr) (read-byte-at addr))]
              [device-id (call-effective offset read-f nixbpe-bits)]
@@ -318,39 +331,68 @@
       (set-reg 'x (+ (get-reg 'x) 1))
       (execute-comp 'x offset nixbpe-bits))
 
-    (define (execute-sic-f3-f4 opcode)
-      (let* ([instr-word (bytes-to-word (list opcode (fetch) (fetch)))]
+    (define (execute-jump offset nixbpe-bits)
+      (set-reg 'pc (call-effective offset
+                                   (lambda (addr) (read-word-at addr))
+                                   nixbpe-bits)))
+    
+    (define (execute-conditional-jump expected-val offset nixbpe-bits)
+      (when (= expected-val (get-reg 'sw))
+        (execute-jump offset nixbpe-bits)))
+
+    (define (execute-sic-f3-f4 b)
+      (let* ([instr-word (bytes-to-word (list b (fetch) (fetch)))]
              [nixbpe-bits (decode-nixbpe-bits instr-word)]
              [offset (bitwise-and instr-word #x7FFF)]
+             [opcode (bitwise-and b #xFC)]
              )
         (match opcode
-          [op-add (execute-arith offset nixbpe-bits +)]
-          [op-and (execute-arith offset nixbpe-bits bitwise-and)]
-          [op-comp (execute-comp 'a offset nixbpe-bits)]
-          [op-div (execute-arith offset nixbpe-bits quotient)]
+          [(== op-add) (execute-arith offset nixbpe-bits +)]
+          [(== op-and) (execute-arith offset nixbpe-bits bitwise-and)]
+          [(== op-comp) (execute-comp 'a offset nixbpe-bits)]
+          [(== op-div) (execute-arith offset nixbpe-bits quotient)]
 
-          ;; TODO implement jumps
-
-          [op-ldch (execute-ldch)]
-          [op-lda (execute-load 'a offset nixbpe-bits)]
-          [op-ldb (execute-load 'b offset nixbpe-bits)]
-          [op-ldl (execute-load 'l offset nixbpe-bits)]
-          [op-lds (execute-load 's offset nixbpe-bits)]
-          [op-ldt (execute-load 't offset nixbpe-bits)]
-          [op-ldx (execute-load 'x offset nixbpe-bits)]
-
-          [op-rd (execute-rd offset nixbpe-bits)]
-          [op-rsub (set-reg 'pc (get-reg 'l))]
+          [(== op-j) (execute-jump offset nixbpe-bits)]
           
-          [op-mul (execute-arith offset nixbpe-bits *)]
-          [op-or (execute-arith offset nixbpe-bits bitwise-ior)]
-          [op-sub (execute-arith offset nixbpe-bits -)]
+          [(== op-jeq) (execute-conditional-jump #x40 offset nixbpe-bits)]
+          [(== op-jgt) (execute-conditional-jump #x34 offset nixbpe-bits)]
+          [(== op-jlt) (execute-conditional-jump #x38 offset nixbpe-bits)]
 
-          [op-td (error "TD not implemented")]
-          [op-tix (execute-tix offset nixbpe-bits)]
-          [op-wd (execute-wd offset nixbpe-bits)]
+          [(== op-jsub)
+           (begin
+             (set-reg 'l (get-reg 'pc))
+             (execute-jump offset nixbpe-bits)
+             )]
+
+          [(== op-ldch) (execute-ldch)]
+          [(== op-lda) (execute-load 'a offset nixbpe-bits)]
+          [(== op-ldb) (execute-load 'b offset nixbpe-bits)]
+          [(== op-ldl) (execute-load 'l offset nixbpe-bits)]
+          [(== op-lds) (execute-load 's offset nixbpe-bits)]
+          [(== op-ldt) (execute-load 't offset nixbpe-bits)]
+          [(== op-ldx) (execute-load 'x offset nixbpe-bits)]
+
+          [(== op-rd) (execute-rd offset nixbpe-bits)]
+          [(== op-rsub) (set-reg 'pc (get-reg 'l))]
           
-          [_ (error "SIC opcode not implemented!")])))
+          [(== op-mul) (execute-arith offset nixbpe-bits *)]
+          [(== op-or) (execute-arith offset nixbpe-bits bitwise-ior)]
+
+          [(== op-sta) (execute-store 'a offset nixbpe-bits)]
+          [(== op-stch) (execute-stch offset nixbpe-bits)]
+          [(== op-stl) (execute-store 'l offset nixbpe-bits)]
+          [(== op-sts) (execute-store 's offset nixbpe-bits)]
+          [(== op-stsw) (execute-store 'sw offset nixbpe-bits)]
+          [(== op-stt) (execute-store 't offset nixbpe-bits)]
+          [(== op-stx) (execute-store 'x offset nixbpe-bits)]
+
+          [(== op-sub) (execute-arith offset nixbpe-bits -)]
+
+          [(== op-td) (error "TD not implemented")]
+          [(== op-tix) (execute-tix offset nixbpe-bits)]
+          [(== op-wd) (execute-wd offset nixbpe-bits)]
+          
+          [_ (error (format "SIC opcode ~a not implemented!" opcode))])))
     
     (define/public (execute)
       (let* ([b (fetch)]
@@ -363,6 +405,9 @@
                   )])
         ;; (print (format "PC: ~a, opcode: ~a" pc-val opcode))
         (f b)))
+
+    (define/public (load-obj filename)
+      (set-reg 'pc (load-section filename mem)))
     ))
 
 (define (create-default-machine) (new machine%))
@@ -395,9 +440,10 @@
   ;; Test store then load
   (check-equal? (send* (new machine%)
                   (write-word-at 0 #x01007B)
-                  ;; (write-word-at 3 #x0F2006)
-                  (write-word-at 3 #x010000)
+                  (write-word-at 3 #x0F2006)
+                  (write-word-at 6 #x010000)
                   
+                  (execute)
                   (execute)
                   (execute)
                   

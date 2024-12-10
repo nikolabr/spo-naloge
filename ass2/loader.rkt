@@ -59,3 +59,5 @@
     (read-text-record ip vec)
     (read-end-record ip))
   )
+
+(provide load-section)
