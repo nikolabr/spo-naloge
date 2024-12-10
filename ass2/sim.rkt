@@ -62,12 +62,93 @@
         op-shiftl op-shiftr op-subr))
 
 ;; SIC
-(define op-add #x18)
-(define op-and #x40)
-(define op-lda #x00)
+(define op-add
+  #x18)
+(define op-and
+  #x40)
+(define op-comp
+  #x28)
+(define op-div
+  #x24)
+(define op-j
+  #x3C)
+(define op-jeq
+  #x30)
+(define op-jgt
+  #x34)
+(define op-jlt
+  #x38)
+(define op-jsub
+  #x48)
+(define op-lda
+  #x00)
+(define op-ldch
+  #x50)
+(define op-ldl
+  #x08)
+(define op-lds
+  #x6C)
+(define op-ldt
+  #x74)
+(define op-ldx
+  #x04)
+(define op-mul
+  #x20)
+(define op-or
+  #x44)
+(define op-rd
+  #xD8)
+(define op-rsub
+  #x4C)
+(define op-sta
+  #x0C)
+(define op-stch
+  #x54)
+(define op-stl
+  #x14)
+(define op-stsw
+  #xE8)
+(define op-stx
+  #x10)
+(define op-sub
+  #x1C)
+(define op-td
+  #xE0)
+(define op-tix
+  #x2C)
+(define op-wd
+  #xDC)
 
 (define sic-opcodes
-  (list op-add op-and op-lda))
+  (list op-add 
+        op-and 
+        op-comp
+        op-div 
+        op-j   
+        op-jeq 
+        op-jgt 
+        op-jlt 
+        op-jsub
+        op-lda 
+        op-ldch
+        op-ldl 
+        op-lds 
+        op-ldt 
+        op-ldx 
+        op-mul 
+        op-or  
+        op-rd  
+        op-rsub
+        op-sta 
+        op-stch
+        op-stl 
+        op-stsw
+        op-stx 
+        op-sub 
+        op-td  
+        op-tix 
+        op-wd
+        ))
 
 (struct nixbpe (n i x b p e) #:transparent)
 
@@ -80,8 +161,6 @@
         [p (bitwise-bit-field instr 13 14)]
         [e (bitwise-bit-field instr 12 13)])
     (nixbpe n i x b p e)))
-
-
 
 (define machine%
   (class object%
@@ -117,17 +196,61 @@
              [reg-name (car (list-ref regs index))])
         (set! regs (dict-set regs reg-name masked-word))))
 
-    (define (fetch-byte addr) (vector-ref mem addr))
-    (define (fetch-word addr)
-      (bytes-to-word (build-list 3 (lambda (i) (fetch-byte (+ addr i))))))
+    (define/public (read-byte-at addr) (vector-ref mem addr))
+    (define/public (read-word-at addr) (bytes-to-word (build-list 3 (lambda (i) (read-byte-at (+ addr i))))))
 
+    (define/public (write-byte-at addr val)
+      (vector-set! mem addr val))
+    
+    (define/public (write-word-at addr val) 
+      (let ([b (word-to-bytes val)]
+            [l (build-list 3)])
+        (map
+         (lambda (i) (write-byte-at
+                      (+ addr i)
+                      (list-ref b i))) l)))
+    
     (define/public (fetch)
       (let* ([old-pc (get-reg 'pc)]
-             [val (fetch-byte old-pc)])
+             [val (read-byte-at old-pc)])
         (set-reg 'pc (+ old-pc 1))
         val))
 
-    (define/public (get-effective-addr addr nixbpe-bits) (list))
+    ;; Return immediate value or call f with the effective address if not immediate
+    (define/public (call-with-effective-addr addr f nixbpe-bits)
+      (let (
+            ;; Fix address
+            [fixed-addr
+             (match nixbpe-bits
+               [(nixbpe 0 0 _ _ _ _) addr]
+               [(nixbpe _ _ _ _ _ 1) (bitwise-ior (arithmetic-shift addr 8) (fetch))]
+               [_ (bitwise-and addr #x3FF)])
+             ])
+        (match nixbpe-bits
+          ;; Simple
+          [(nixbpe 1 1 0 0 0 _) (f fixed-addr)]
+          
+          [(nixbpe 1 1 0 0 1 0) (f (+ fixed-addr (get-reg 'pc)))]
+          [(nixbpe 1 1 0 1 0 0) (f (+ fixed-addr (get-reg 'b)))]
+          [(nixbpe 1 1 1 0 0 _) (f (+ fixed-addr (get-reg 'x)))]
+
+          [(nixbpe 1 1 1 0 1 0) (f (apply + fixed-addr (get-reg 'x) (get-reg 'pc)))]
+          [(nixbpe 1 1 1 1 0 0) (f (apply + fixed-addr (get-reg 'x) (get-reg 'b)))]
+
+          [(nixbpe 0 0 0 _ _ _) (f fixed-addr)]
+          [(nixbpe 0 0 1 _ _ _) (f (+ fixed-addr (get-reg 'x)))]
+          
+          ;; Indirect
+          [(nixbpe 1 0 0 0 0 _) (f (read-word-at fixed-addr))]
+          [(nixbpe 1 0 0 0 1 0) (f (+ (read-word-at fixed-addr) (get-reg 'pc)))]
+          [(nixbpe 1 0 0 1 0 0) (f (+ (read-word-at fixed-addr) (get-reg 'b)))]
+
+          ;; Immediate
+          [(nixbpe 0 1 0 0 0 _) fixed-addr]
+          [(nixbpe 0 1 0 0 1 _) (+ fixed-addr (get-reg 'pc))]
+          [(nixbpe 0 1 0 0 0 _) (+ fixed-addr (get-reg 'b))]
+          
+          [_ (error "Invalid addressing mode")])))
 
     (define (execute-f1 opcode) (error-not-implemented))
 
@@ -151,7 +274,9 @@
 
     (define (execute-sic-f3-f4 opcode)
       (let* ([instr-word (bytes-to-word (list opcode (fetch) (fetch)))]
-             [addr-bits (decode-nixbpe-bits instr-word)])
+             [nixbpe-bits (decode-nixbpe-bits instr-word)]
+             [offset (bitwise-and instr-word #x7FFF)]
+             )
         (match opcode
           [_ (error-not-implemented)])))
     
@@ -159,6 +284,7 @@
       (let* ([opcode (fetch)]
              [f (cond
                   [(member opcode f2-opcodes) execute-f2]
+                  [(member opcode sic-opcodes) execute-sic-f3-f4]
                   [#t (error-not-implemented)])])
         (f opcode)))
     ))
