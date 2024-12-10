@@ -38,6 +38,14 @@
 
 (define reg-mask #xFFFFFF)
 
+(define (unsigned->signed len val)
+  (let* ([mask (arithmetic-shift 1 (- len 1))]
+         [msb (bitwise-and val mask)])
+    (if (= msb 0)
+        val
+        (- (+ (bitwise-xor (bitwise-and val (- mask 1)) (- mask 1)) 1))
+        )))
+
 ;; F2
 (define op-addr #x58)
 (define op-clear #xB4)
@@ -187,7 +195,7 @@
 
     (define/public (set-reg reg word)
       (let ([masked-word (bitwise-and word reg-mask)])
-        (set! regs (dict-set regs reg word))))
+        (set! regs (dict-set regs reg masked-word))))
 
     (define/public (get-reg-index index)
       (cdr (list-ref regs index)))
@@ -221,44 +229,55 @@
     (define/public (call-effective addr f nixbpe-bits)
       (let* (
              ;; Fix address
-             [is-e-format
+             [fmt
               (match nixbpe-bits
-                [(nixbpe _ _ _ _ _ 1) #t]
-                [_ #f])]
+                [(nixbpe _ _ _ _ _ 1) 'f4]
+                [(nixbpe 0 0 _ _ _ _) 'sic]
+                [_ 'f3])]
+             [addr-len
+              (match fmt
+                ['f3 12]
+                ['f4 20]
+                ['sic 15]
+                [_ (error "abc")])]
              [fixed-addr
-              (if is-e-format
-                  (bitwise-ior (arithmetic-shift addr 8) (fetch))
-                  (bitwise-and addr #x3FF))
+              (match fmt
+                ['f3 (unsigned->signed addr-len (bitwise-and addr #xFFF))]
+                ['f4 (unsigned->signed addr-len (bitwise-ior (arithmetic-shift addr 8) (fetch)))]
+                ['sic (unsigned->signed addr-len addr)]
+                [_ (error "Unknown instruction format!")])
               ]
-             [pc-val (get-reg 'pc)])
-        
-        ;; (print nixbpe-bits)
+             [pc-val (get-reg 'pc)]
+             [mask (- (arithmetic-shift 1 addr-len) 1)]
+             [res (match nixbpe-bits
+                    ;; Simple
+                    [(nixbpe 1 1 0 0 0 _) (f fixed-addr)]
+                    
+                    [(nixbpe 1 1 0 0 1 0) (f (+ fixed-addr pc-val))]
+                    [(nixbpe 1 1 0 1 0 0) (f (+ fixed-addr (get-reg 'b)))]
+                    [(nixbpe 1 1 1 0 0 _) (f (+ fixed-addr (get-reg 'x)))]
+                    
+                    [(nixbpe 1 1 1 0 1 0) (f (apply + fixed-addr (get-reg 'x) pc-val))]
+                    [(nixbpe 1 1 1 1 0 0) (f (apply + fixed-addr (get-reg 'x) (get-reg 'b)))]
 
-        (match nixbpe-bits
-          ;; Simple
-          [(nixbpe 1 1 0 0 0 _) (f fixed-addr)]
-          
-          [(nixbpe 1 1 0 0 1 0) (f (+ fixed-addr pc-val))]
-          [(nixbpe 1 1 0 1 0 0) (f (+ fixed-addr (get-reg 'b)))]
-          [(nixbpe 1 1 1 0 0 _) (f (+ fixed-addr (get-reg 'x)))]
-          
-          [(nixbpe 1 1 1 0 1 0) (f (apply + fixed-addr (get-reg 'x) pc-val))]
-          [(nixbpe 1 1 1 1 0 0) (f (apply + fixed-addr (get-reg 'x) (get-reg 'b)))]
+                    [(nixbpe 0 0 0 _ _ _) (f fixed-addr)]
+                    [(nixbpe 0 0 1 _ _ _) (f (+ fixed-addr (get-reg 'x)))]
+                    
+                    ;; Indirect
+                    [(nixbpe 1 0 0 0 0 _) (f (read-word-at fixed-addr))]
+                    [(nixbpe 1 0 0 0 1 0) (f (+ (read-word-at fixed-addr) pc-val))]
+                    [(nixbpe 1 0 0 1 0 0) (f (+ (read-word-at fixed-addr) (get-reg 'b)))]
 
-          [(nixbpe 0 0 0 _ _ _) (f fixed-addr)]
-          [(nixbpe 0 0 1 _ _ _) (f (+ fixed-addr (get-reg 'x)))]
-          
-          ;; Indirect
-          [(nixbpe 1 0 0 0 0 _) (f (read-word-at fixed-addr))]
-          [(nixbpe 1 0 0 0 1 0) (f (+ (read-word-at fixed-addr) pc-val))]
-          [(nixbpe 1 0 0 1 0 0) (f (+ (read-word-at fixed-addr) (get-reg 'b)))]
-
-          ;; Immediate
-          [(nixbpe 0 1 0 0 0 _) fixed-addr]
-          [(nixbpe 0 1 0 0 1 _) (+ fixed-addr pc-val)]
-          [(nixbpe 0 1 0 0 0 _) (+ fixed-addr (get-reg 'b))]
-          
-          [_ (error "Invalid addressing mode")])))
+                    ;; Immediate
+                    [(nixbpe 0 1 0 0 0 _) fixed-addr]
+                    [(nixbpe 0 1 0 0 1 _) (+ fixed-addr pc-val)]
+                    [(nixbpe 0 1 0 0 0 _) (+ fixed-addr (get-reg 'b))]
+                    
+                    [_ (error "Invalid addressing mode")])])
+        (if (exact-integer? res)
+            (bitwise-and mask res)
+            res)
+        ))
 
     (define (execute-f1 opcode) (error "F1 opcodes not implemented!"))
     
@@ -433,7 +452,9 @@
   ;; Test immediate
   (check-equal? (send* (new machine%)
                   (write-word-at 0 #x01007B)
+
                   (execute)
+
                   (get-reg 'a))
                 123)
   
@@ -448,5 +469,13 @@
                   (execute)
                   
                   (get-reg 'a))
-                123)  
+                0)  
+
+  (check-equal? (send* (new machine%)
+                  (write-word-at 0 #x010FFF)
+                  
+                  (execute)
+                  
+                  (get-reg 'a))
+                4095)
   )
