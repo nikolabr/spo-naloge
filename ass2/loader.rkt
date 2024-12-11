@@ -38,26 +38,29 @@
     nb))
 
 (define (parse-text-record line vec)
-  (let ([start-addr (parse-text-start (substring line 0 11))])
-    (if (false? start-addr)
-        #f
-        (let ([str-elems (string-split (substring line 11))]
-              [f (lambda (el addr)
-                   (+ addr (parse-element addr vec el)))])
-          (foldl f start-addr str-elems)))))
+  (if (> (string-length line) 11)
+      (let ([start-addr (parse-text-start (substring line 0 11))])
+        (if (false? start-addr)
+            #f
+            (let ([str-elems (string-split (substring line 11))]
+                  [f (lambda (el addr)
+                       (+ addr (parse-element addr vec el)))])
+              (foldl f start-addr str-elems))))
+      #f)
+  )
 
 (define (read-text-record ip vec)
-  (let* ([v (parse-text-record (read-line ip) vec)])
+  (let* ([line (read-line ip)]
+         [v (parse-text-record line vec)])
     (if (false? v)
-        v
+        (parse-end-record line)
         (read-text-record ip v))))
 
 ;; Takes memory vec as argument, returns new PC
 (define (load-section filename vec)
   (let* ([ip (open-input-file filename)])
     (read-head-record ip)
-    (read-text-record ip vec)
-    (read-end-record ip))
+    (read-text-record ip vec))
   )
 
 (provide load-section)

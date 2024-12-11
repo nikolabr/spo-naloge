@@ -187,8 +187,11 @@
         (pc . 0)
         (sw . 0)))
 
-    (define mem-size 128)
+    (define mem-size (arithmetic-shift 1 20))
     (define mem (make-vector mem-size))
+
+    (define/public (get-mem-size) mem-size)
+    (define/public (get-mem) mem)
 
     (define/public (get-reg reg)
       (dict-ref regs reg))
@@ -259,7 +262,7 @@
                     
                     [(nixbpe 1 1 1 0 1 0) (f (apply + fixed-addr (get-reg 'x) pc-val))]
                     [(nixbpe 1 1 1 1 0 0) (f (apply + fixed-addr (get-reg 'x) (get-reg 'b)))]
-
+                    
                     [(nixbpe 0 0 0 _ _ _) (f fixed-addr)]
                     [(nixbpe 0 0 1 _ _ _) (f (+ fixed-addr (get-reg 'x)))]
                     
@@ -274,9 +277,7 @@
                     [(nixbpe 0 1 0 0 0 _) (+ fixed-addr (get-reg 'b))]
                     
                     [_ (error "Invalid addressing mode")])])
-        (if (exact-integer? res)
-            (bitwise-and mask res)
-            res)
+        res
         ))
 
     (define (execute-f1 opcode) (error "F1 opcodes not implemented!"))
@@ -345,14 +346,14 @@
              [device-id (call-effective offset read-f nixbpe-bits)]
              [b (bitwise-and (get-reg 'a) #xFF)])
         (write-machine-device device-id b)))
-
+    
     (define (execute-tix offset nixbpe-bits)
       (set-reg 'x (+ (get-reg 'x) 1))
       (execute-comp 'x offset nixbpe-bits))
 
     (define (execute-jump offset nixbpe-bits)
       (set-reg 'pc (call-effective offset
-                                   (lambda (addr) (read-word-at addr))
+                                   (lambda (addr) addr)
                                    nixbpe-bits)))
     
     (define (execute-conditional-jump expected-val offset nixbpe-bits)
@@ -431,6 +432,8 @@
 
 (define (create-default-machine) (new machine%))
 
+(provide machine%)
+
 (module+ test
   (require rackunit)
   (check-equal? (send* (new machine%)
@@ -478,4 +481,11 @@
                   
                   (get-reg 'a))
                 4095)
+
+  (check-equal? (send* (new machine%)
+                  (write-word-at 0 #x3F2FFD)
+                  (execute)
+                  (get-reg 'pc)
+                  )
+                0)
   )
