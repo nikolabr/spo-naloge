@@ -54,7 +54,7 @@
          [v (parse-text-record line vec)])
     (if (false? v)
         (parse-end-record line)
-        (read-text-record ip v))))
+        (read-text-record ip vec))))
 
 ;; Takes memory vec as argument, returns new PC
 (define (load-section filename vec)

@@ -25,13 +25,13 @@
 (define mem-view-addr 0)
 
 (define (read-mem start-addr)
-  (for/list ([i (in-range start-addr (+ start-addr 128))])
+  (for/list ([i (in-range start-addr (+ start-addr 144))])
     (let* ([fs (cond
                  [(= (modulo (+ (- i start-addr) 1) 12) 0) "~x~x\n"]
                  [(= (modulo (+ (- i start-addr) 1) 3) 0) "~x~x "]
                  [else "~x~x"]
                      )]
-           [x (send sim read-word-at i)]
+           [x (send sim read-byte-at i)]
            [x1 (bitwise-bit-field x 4 8)]
            [x2 (bitwise-bit-field x 0 4)])
       (format fs x1 x2))
@@ -91,6 +91,7 @@
 (define editor-canvas (new editor-canvas%
                            (parent frame)
                            (label "Editor Canvas")))
+
 (define text (new text%))
 (send editor-canvas set-editor text)
 

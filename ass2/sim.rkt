@@ -26,14 +26,16 @@
 ;; Write byte to port
 (define (write-machine-device device-id byte)
   (let ([device-port (get-output-port device-id)])
-    (display byte device-port)
-    (and (file-stream-port? device-port) (close-output-port device-port))))
+    (display (integer->char byte) device-port)
+    (flush-output (current-output-port))
+    ;; (and (file-stream-port? device-port) (close-output-port device-port))
+    ))
 
 ;; Read one byte from port
 (define (read-machine-device device-id)
   (let* ([device-port (get-input-port device-id)]
          [res (read-byte device-port)])
-    (and (file-stream-port? device-port) (close-output-port device-port))
+    ;; (and (file-stream-port? device-port) (close-input-port device-port))
     res))
 
 (define reg-mask #xFFFFFF)
@@ -47,7 +49,7 @@
         )))
 
 ;; F2
-(define op-addr #x58)
+(define op-addr #x90)
 (define op-clear #xB4)
 (define op-compr #xA0)
 (define op-divr #x9C)
@@ -137,7 +139,8 @@
         op-jgt 
         op-jlt 
         op-jsub
-        op-lda 
+        op-lda
+        op-ldb
         op-ldch
         op-ldl 
         op-lds 
@@ -220,6 +223,8 @@
            [l (build-list 3 (lambda (i) (write-byte-at
                                          (+ addr i)
                                          (list-ref b i))))])
+        ;; (display (format "ADDR: ~X \n" addr))
+        (flush-output (current-output-port))
         l))
     
     (define/public (fetch)
@@ -242,7 +247,7 @@
                 ['f3 12]
                 ['f4 20]
                 ['sic 15]
-                [_ (error "abc")])]
+                [_ (error "Unknown instruction format!")])]
              [fixed-addr
               (match fmt
                 ['f3 (unsigned->signed addr-len (bitwise-and addr #xFFF))]
@@ -260,16 +265,16 @@
                     [(nixbpe 1 1 0 1 0 0) (f (+ fixed-addr (get-reg 'b)))]
                     [(nixbpe 1 1 1 0 0 _) (f (+ fixed-addr (get-reg 'x)))]
                     
-                    [(nixbpe 1 1 1 0 1 0) (f (apply + fixed-addr (get-reg 'x) pc-val))]
-                    [(nixbpe 1 1 1 1 0 0) (f (apply + fixed-addr (get-reg 'x) (get-reg 'b)))]
+                    [(nixbpe 1 1 1 0 1 0) (f (apply + (list fixed-addr (get-reg 'x) pc-val)))]
+                    [(nixbpe 1 1 1 1 0 0) (f (apply + (list fixed-addr (get-reg 'x) (get-reg 'b))))]
                     
                     [(nixbpe 0 0 0 _ _ _) (f fixed-addr)]
                     [(nixbpe 0 0 1 _ _ _) (f (+ fixed-addr (get-reg 'x)))]
                     
                     ;; Indirect
                     [(nixbpe 1 0 0 0 0 _) (f (read-word-at fixed-addr))]
-                    [(nixbpe 1 0 0 0 1 0) (f (+ (read-word-at fixed-addr) pc-val))]
-                    [(nixbpe 1 0 0 1 0 0) (f (+ (read-word-at fixed-addr) (get-reg 'b)))]
+                    [(nixbpe 1 0 0 0 1 0) (f (read-word-at (+ pc-val fixed-addr)))]
+                    [(nixbpe 1 0 0 1 0 0) (f (read-word-at (+ fixed-addr (get-reg 'b))))]
 
                     ;; Immediate
                     [(nixbpe 0 1 0 0 0 _) fixed-addr]
@@ -277,6 +282,7 @@
                     [(nixbpe 0 1 0 0 0 _) (+ fixed-addr (get-reg 'b))]
                     
                     [_ (error "Invalid addressing mode")])])
+
         res
         ))
 
@@ -286,7 +292,7 @@
       (let* ([operand (fetch)]
              [r1 (bitwise-bit-field operand 4 8)]
              [r2 (bitwise-bit-field operand 0 4)]
-             [r1-val (get-reg-index r2)]
+             [r1-val (get-reg-index r1)]
              [r2-val (get-reg-index r2)]
              )
         (match opcode
@@ -295,7 +301,7 @@
           [(== op-compr) (error "COMPR not implemented!")]
           [(== op-divr) (set-reg-index r1 (quotient r1-val r2-val))]
           [(== op-mulr) (set-reg-index r1 (* r1-val r2-val))]
-          [(== op-rmo) (set-reg-index r1 r2-val)]
+          [(== op-rmo) (set-reg-index r2 r1-val)]
           [(== op-shiftl) (set-reg-index r1 (arithmetic-shift r1-val r2))]
           [(== op-shiftl) (set-reg-index r1 (arithmetic-shift r1-val (- r2)))]
           [_ (error "Unknown F2 opcode")])))
@@ -332,7 +338,7 @@
 
     (define (execute-stch offset nixbpe-bits)
       (let* ([a (get-reg 'a)]
-             [write-f (lambda (addr) (write-byte-at addr))])
+             [write-f (lambda (addr) (write-byte-at addr (bitwise-and a #xFF)))])
         (call-effective offset write-f nixbpe-bits)))
 
     (define (execute-rd offset nixbpe-bits)
@@ -363,7 +369,7 @@
     (define (execute-sic-f3-f4 b)
       (let* ([instr-word (bytes-to-word (list b (fetch) (fetch)))]
              [nixbpe-bits (decode-nixbpe-bits instr-word)]
-             [offset (bitwise-and instr-word #x7FFF)]
+             [offset (bitwise-and instr-word #xFFF)]
              [opcode (bitwise-and b #xFC)]
              )
         (match opcode
@@ -375,16 +381,16 @@
           [(== op-j) (execute-jump offset nixbpe-bits)]
           
           [(== op-jeq) (execute-conditional-jump #x40 offset nixbpe-bits)]
-          [(== op-jgt) (execute-conditional-jump #x34 offset nixbpe-bits)]
-          [(== op-jlt) (execute-conditional-jump #x38 offset nixbpe-bits)]
-
+          [(== op-jgt) (execute-conditional-jump #x80 offset nixbpe-bits)]
+          [(== op-jlt) (execute-conditional-jump #x00 offset nixbpe-bits)]
+          
           [(== op-jsub)
            (begin
              (set-reg 'l (get-reg 'pc))
              (execute-jump offset nixbpe-bits)
              )]
 
-          [(== op-ldch) (execute-ldch)]
+          [(== op-ldch) (execute-ldch offset nixbpe-bits)]
           [(== op-lda) (execute-load 'a offset nixbpe-bits)]
           [(== op-ldb) (execute-load 'b offset nixbpe-bits)]
           [(== op-ldl) (execute-load 'l offset nixbpe-bits)]
@@ -423,7 +429,6 @@
                   [(member opcode sic-opcodes) execute-sic-f3-f4]
                   [else (error (format "Invalid opcode: ~a at ~a" opcode pc-val))]
                   )])
-        ;; (print (format "PC: ~a, opcode: ~a" pc-val opcode))
         (f b)))
 
     (define/public (load-obj filename)
@@ -488,4 +493,33 @@
                   (get-reg 'pc)
                   )
                 0)
+
+  (check-equal? (send* (new machine%)
+                  (write-word-at 0 #x0110FF)
+                  (write-byte-at 3 #xFF)
+                  (execute)
+                  (get-reg 'a)
+                  )
+                #xFFFF)
+
+  (check-equal? (send* (new machine%)
+                  (write-word-at 0 #x01007B)
+                  (write-word-at 3 #x0F208F)
+
+                  (execute)
+                  (execute)
+
+                  (read-word-at #x95)
+                  ) 123)
+
+  (check-equal? (send* (new machine%)
+                  (write-word-at 0 #x01007B)
+                  (write-byte-at 3 #xAC)
+                  (write-byte-at 4 #x01)
+
+                  (execute)
+                  (execute)
+                  
+                  (get-reg 'x)
+                  ) 123)
   )
