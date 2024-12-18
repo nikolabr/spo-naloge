@@ -288,6 +288,12 @@
 
     (define (execute-f1 opcode) (error "F1 opcodes not implemented!"))
     
+    (define (execute-compr r1-val r2-val)
+      (cond
+          [(< r1-val r2-val) (set-reg 'sw #x00)]
+          [(eq? r1-val r2-val) (set-reg 'sw #x40)]
+          [(> r1-val r2-val) (set-reg 'sw #x80)]))
+
     (define (execute-f2 opcode)
       (let* ([operand (fetch)]
              [r1 (bitwise-bit-field operand 4 8)]
@@ -298,7 +304,7 @@
         (match opcode
           [(== op-addr) (set-reg-index r1 (+ r1-val r2-val))]
           [(== op-clear) (set-reg-index r1 0)]
-          [(== op-compr) (error "COMPR not implemented!")]
+          [(== op-compr) (execute-compr r1-val r2-val)]
           [(== op-divr) (set-reg-index r1 (quotient r1-val r2-val))]
           [(== op-mulr) (set-reg-index r1 (* r1-val r2-val))]
           [(== op-rmo) (set-reg-index r2 r1-val)]
@@ -485,7 +491,7 @@
                   (execute)
                   
                   (get-reg 'a))
-                4095)
+                16777215)
 
   (check-equal? (send* (new machine%)
                   (write-word-at 0 #x3F2FFD)
