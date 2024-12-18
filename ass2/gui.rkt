@@ -10,7 +10,7 @@
 (define frame (new frame%
                    [label "Racket SIC-Xe sim"]
                    [width 1024]
-                   [height 768]))
+                   [height 1024]))
 
 (define reg-names (list "A" "X" "L" "B" "S" "T" "F" "PC" "SW"))
 
