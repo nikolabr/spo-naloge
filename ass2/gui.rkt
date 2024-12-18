@@ -52,8 +52,12 @@
   (update-mem-view)
   )
 
+(define panel (new horizontal-panel%
+                       [parent frame]
+                       [alignment '(center center)]))
+
 (define reset-button (new button%
-                          [parent frame]
+                          [parent panel]
                           [label "Reset"]
                           [callback (lambda (button event)
                                       (set! sim (new machine%))
@@ -63,7 +67,7 @@
   (get-file))
 
 (define load-button (new button%
-                          [parent frame]
+                          [parent panel]
                           [label "Load"]
                           [callback (lambda (button event)
                                       (let ([filename (load-object-file)])
@@ -72,7 +76,7 @@
                                         ))]))
 
 (define step-button (new button%
-                         [parent frame]
+                         [parent panel]
                          [label "Step"]
                          [callback (lambda (button event)
                                      (send sim execute)
@@ -95,4 +99,25 @@
 (define text (new text%))
 (send editor-canvas set-editor text)
 
+(define step-timer (new timer%
+                        [interval #f]
+                        [notify-callback (lambda ()
+                                    (send sim execute)
+                                    (update-machine))]))
+
+
+(define start-button (new button%
+                         [parent panel]
+                         [label "Start"]
+                         [callback (lambda (button event)
+                                     (send step-timer start 50))]))
+
+(define stop-button (new button%
+                         [parent panel]
+                         [label "Stop"]
+                         [callback (lambda (button event)
+                                     (send step-timer stop))]))
+
+
 (send frame show #t)
+
