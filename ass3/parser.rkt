@@ -4,17 +4,23 @@
 (require (prefix-in : parser-tools/lex-sre))
 (require parser-tools/yacc)
 
+(provide sicxe/lexer)
+(provide sicxe/parser)
+(provide sicxe/parse)
+(provide sicxe/get-tokens)
+
 (define-tokens basic-tokens (SYMBOL INSTR))
 (define-empty-tokens directives (START END ORG EQU BYTE WORD RESB RESW))
-(define-empty-tokens punct-tokens (NLINE EOF DOT SPACE COMMA ASTERISK MINUS PLUS LITERAL))
+(define-empty-tokens punct-tokens (NLINE EOF DOT SPACE COMMA ASTERISK MINUS PLUS LITERAL AT SINGLEQUOTE))
 
 (define sicxe/lexer
   (lexer-src-pos
    ;; Whitespace, comments
    [(eof) (token-EOF)]
    ["\n" (token-NLINE)]
-   [(concatenation whitespace "\n") (token-NLINE)]
-   [whitespace (token-SPACE)]
+   [(concatenation (:+ blank) "\n") (token-NLINE)]
+   [(:+ blank) (token-SPACE)]
+   ["@" (token-AT)]
    ["." (token-DOT)]
    ["," (token-COMMA)]
    ["*" (token-ASTERISK)]
@@ -49,8 +55,9 @@
     (token-INSTR (string->symbol (string-append "op-" (string-downcase lexeme))))]
    
    ["#" (token-LITERAL)]
+   ["'" (token-SINGLEQUOTE)]
    [(:+ numeric) (token-SYMBOL (string->number lexeme))]
-   [(:+ alphabetic) (token-SYMBOL lexeme)]
+   [(:+ (:or alphabetic numeric "_")) (token-SYMBOL lexeme)]
    ))
 
 (define (split-lines l)
@@ -66,7 +73,7 @@
 
 (define (sicxe/get-tokens p)
   (let ([lx (sicxe/lexer p)])
-    (if (equal? (token-name lx) 'EOF)
+    (if (equal? (token-name (position-token-token lx)) 'EOF)
         (list lx)
         (append (list lx) (sicxe/get-tokens p)))))
 
@@ -87,25 +94,40 @@
      [(SYMBOL) '()]]
     
     [symbol
-     [(LITERAL SYMBOL) $2]
+     [(LITERAL SYMBOL) (cons 'literal $2)]
+     [(AT SYMBOL) (cons 'indirect $2)]
      [(SYMBOL) $1]]
+
+    [modifier
+     [(PLUS) 'long]
+     ]
+
+    [array-expr
+     [(SYMBOL SINGLEQUOTE SYMBOL SINGLEQUOTE) (cons $1 $3)]]
     
     [line
-     [(SPACE START SPACE SYMBOL) (cons 'start $4)]
-     [(SPACE END SPACE SYMBOL) (cons 'end $4)]
-     [(SPACE ORG SPACE SYMBOL) (cons 'org $4)]
+     [(SPACE START SPACE SYMBOL) (cons "START" $4)]
+     [(SPACE END SPACE SYMBOL) (cons "END" $4)]
+     [(SPACE ORG SPACE SYMBOL) (cons "ORG" $4)]
      
-     [(SPACE EQU SPACE SYMBOL) (cons 'equ $4)]
-     [(SPACE EQU SPACE ASTERISK) (cons 'equ "*")]
+     [(SPACE EQU SPACE SYMBOL) (cons "EQU" $4)]
+     [(SPACE EQU SPACE ASTERISK) (cons "EQU" "*")]
 
-     [(SPACE BYTE SPACE SYMBOL) (cons 'byte $4)]
-     [(SPACE WORD SPACE SYMBOL) (cons 'word $4)]
+     [(SPACE BYTE SPACE SYMBOL) (cons "BYTE" $4)]
+     [(SPACE BYTE SPACE array-expr) (cons "BYTE" $4)]
+     
+     [(SPACE WORD SPACE SYMBOL) (cons "WORD" $4)]
+     [(SPACE WORD SPACE array-expr) (cons "WORD" $4)]
 
-     [(SPACE RESB SPACE SYMBOL) (cons 'resb $4)]
-     [(SPACE RESW SPACE SYMBOL) (cons 'resw $4)]
+     [(SPACE RESB SPACE SYMBOL) (cons "RESB" $4)]
+     [(SPACE RESW SPACE SYMBOL) (cons "RESB" $4)]
      
      [(SPACE INSTR SPACE symbol COMMA SPACE symbol) (list $2 $4 $7)]
      [(SPACE INSTR SPACE symbol) (cons $2 $4)]
+     [(SPACE INSTR) (list $2)]
+
+     [(SPACE modifier INSTR SPACE symbol COMMA SPACE symbol) (list $2 $3 $5 $8)]
+     [(SPACE modifier INSTR SPACE symbol) (list $2 $3 $5)]
 
      [(SYMBOL line) (cons $1 $2)]
 
@@ -113,7 +135,7 @@
      [() '()]]
     [lines
      [(line NLINE lines) (append (list $1) $3)]
-     [(line DOT comment-body NLINE lines) (append (list $1) $3)]
+     [(line DOT comment-body NLINE lines) (append (list $1) $5)]
      [(line) (list $1)]
      ]
     ]

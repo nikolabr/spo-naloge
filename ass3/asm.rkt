@@ -1,5 +1,7 @@
 #lang racket
 
+(require "parser.rkt")
+
 (define f1-opcodes (list))
 
 ;; F2
@@ -121,12 +123,27 @@
   (and (not (empty? l)) (equal? (car l) 'plus)))
 
 (define (instr-length l)
-  (let* ([opcode (car l)])
+  (display l)
+  (display "\n")
+  
+  (let* ([first-elem (if (or (list? l) (cons? l)) (car l) #f)]
+         [opcode (if (symbol? first-elem) (eval first-elem) #f)])
     (cond
       [(member opcode f1-opcodes) 1]
       [(member opcode f2-opcodes) 2]
-      [(member opcode sic-opcodes) (if (is-f4? l) 4 3)])))
+      [(member opcode sic-opcodes) (if (is-f4? l) 4 3)]
+      [#t 0])))
+
+(define (process-line l res)
+
+  
+  (if (empty? l)
+      res
+      (let* ([prev (last res)]
+             [label (if (string? (car l)) (car l) "")]
+             [len (instr-length (if (string? (car l)) (cdr l) l))])
+        (append res (list (cons label (+ len (cdr prev))))))))
 
 ;; First pass of assembler
 (define (first-pass ast)
-  #f)
+  (foldl process-line (list (cons "" 0)) ast))
