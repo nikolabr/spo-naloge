@@ -8,6 +8,9 @@
 (provide sicxe/parser)
 (provide sicxe/parse)
 (provide sicxe/get-tokens)
+(provide sicxe/directive-names)
+
+(define sicxe/directive-names (list "START" "END" "ORG" "EQU" "BYTE" "WORD" "RESB" "RESW"))
 
 (define-tokens basic-tokens (SYMBOL INSTR))
 (define-empty-tokens directives (START END ORG EQU BYTE WORD RESB RESW))
@@ -94,8 +97,8 @@
      [(SYMBOL) '()]]
     
     [symbol
-     [(LITERAL SYMBOL) (cons 'literal $2)]
-     [(AT SYMBOL) (cons 'indirect $2)]
+     [(LITERAL SYMBOL) (list 'literal $2)]
+     [(AT SYMBOL) (list 'indirect $2)]
      [(SYMBOL) $1]]
 
     [modifier
@@ -103,31 +106,31 @@
      ]
 
     [array-expr
-     [(SYMBOL SINGLEQUOTE SYMBOL SINGLEQUOTE) (cons $1 $3)]]
+     [(SYMBOL SINGLEQUOTE SYMBOL SINGLEQUOTE) (list $1 $3)]]
     
     [line
-     [(SPACE START SPACE SYMBOL) (cons "START" $4)]
-     [(SPACE END SPACE SYMBOL) (cons "END" $4)]
-     [(SPACE ORG SPACE SYMBOL) (cons "ORG" $4)]
+     [(SPACE START SPACE SYMBOL) (list "START" $4)]
+     [(SPACE END SPACE SYMBOL) (list "END" $4)]
+     [(SPACE ORG SPACE SYMBOL) (list "ORG" $4)]
      
-     [(SPACE EQU SPACE SYMBOL) (cons "EQU" $4)]
-     [(SPACE EQU SPACE ASTERISK) (cons "EQU" "*")]
+     [(SPACE EQU SPACE SYMBOL) (list "EQU" $4)]
+     [(SPACE EQU SPACE ASTERISK) (list "EQU" "*")]
 
-     [(SPACE BYTE SPACE SYMBOL) (cons "BYTE" $4)]
-     [(SPACE BYTE SPACE array-expr) (cons "BYTE" $4)]
+     [(SPACE BYTE SPACE SYMBOL) (list "BYTE" $4)]
+     [(SPACE BYTE SPACE array-expr) (list "BYTE" $4)]
      
-     [(SPACE WORD SPACE SYMBOL) (cons "WORD" $4)]
-     [(SPACE WORD SPACE array-expr) (cons "WORD" $4)]
+     [(SPACE WORD SPACE SYMBOL) (list "WORD" $4)]
+     [(SPACE WORD SPACE array-expr) (list "WORD" $4)]
 
-     [(SPACE RESB SPACE SYMBOL) (cons "RESB" $4)]
-     [(SPACE RESW SPACE SYMBOL) (cons "RESB" $4)]
+     [(SPACE RESB SPACE SYMBOL) (list "RESB" $4)]
+     [(SPACE RESW SPACE SYMBOL) (list "RESB" $4)]
      
      [(SPACE INSTR SPACE symbol COMMA SPACE symbol) (list $2 $4 $7)]
-     [(SPACE INSTR SPACE symbol) (cons $2 $4)]
+     [(SPACE INSTR SPACE symbol) (list $2 $4)]
      [(SPACE INSTR) (list $2)]
 
-     [(SPACE modifier INSTR SPACE symbol COMMA SPACE symbol) (list $2 $3 $5 $8)]
-     [(SPACE modifier INSTR SPACE symbol) (list $2 $3 $5)]
+     [(SPACE modifier INSTR SPACE symbol COMMA SPACE symbol) (list $3 $2 $5 $8)]
+     [(SPACE modifier INSTR SPACE symbol) (list $3 $2 $5)]
 
      [(SYMBOL line) (cons $1 $2)]
 

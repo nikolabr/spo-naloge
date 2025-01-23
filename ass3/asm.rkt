@@ -120,30 +120,68 @@
         ))
 
 (define (is-f4? l)
-  (and (not (empty? l)) (equal? (car l) 'plus)))
+  (and (not (empty? l)) (equal? (second l) 'long)))
+
+(define (hex-array->bytes s)
+  (let ([l (bytes->list (string->bytes/utf-8 s))]
+        [fn (lambda (t)
+              (cond
+                [(and (>= t 48) (<= t 58)) (- t 48)]
+                [(and (>= t 65) (<= t 70)) (+ (- t 65) 10)]
+                [else (error "Unknown array")]
+                ))])
+    (list->bytes (map fn l))))
+
+(define (parse-array s)
+  (if (or (not (list? s)) (< (length s) 2))
+      s
+      (let ([type (first s)]
+            [content (second s)])
+        (match type
+          ["C" (string->bytes/utf-8 content)]
+          ["X" (hex-array->bytes content)]
+          [_ (error "Unknown array type")]))))
 
 (define (instr-length l)
-  (display l)
-  (display "\n")
-  
-  (let* ([first-elem (if (or (list? l) (cons? l)) (car l) #f)]
-         [opcode (if (symbol? first-elem) (eval first-elem) #f)])
-    (cond
-      [(member opcode f1-opcodes) 1]
-      [(member opcode f2-opcodes) 2]
-      [(member opcode sic-opcodes) (if (is-f4? l) 4 3)]
-      [#t 0])))
+  (if (empty? l)
+      0
+      (let* ([first-elem (if (or (list? l) (cons? l)) (car l) #f)]
+         [opcode (if (symbol? first-elem)
+                     (eval first-elem)
+                     first-elem)]
+         [is-long (and (>= (length l) 2) (is-f4? l))]
+         [rem (remove 'long l)])
+        (cond
+          [(member opcode f1-opcodes) 1]
+          [(member opcode f2-opcodes) 2]
+          [(member opcode sic-opcodes) (if is-long 4 3)]
+      
+          [(member first-elem '("BYTE" "RESB"))
+           (let ([b (parse-array (cdr rem))])
+             (if (bytes? b) (bytes-length b) 1))]
+      
+          [(member first-elem '("WORD" "RESW"))
+           (let ([b (parse-array (cdr rem))])
+             (if (bytes? b) (bytes-length b) 3))]
+
+          [(equal? first-elem "ORG") (second l)]
+          
+          [else 0]))
+      ))
 
 (define (process-line l res)
-
-  
   (if (empty? l)
       res
       (let* ([prev (last res)]
-             [label (if (string? (car l)) (car l) "")]
-             [len (instr-length (if (string? (car l)) (cdr l) l))])
-        (append res (list (cons label (+ len (cdr prev))))))))
+             [first-elem (car l)]
+             [is-first-string (string? first-elem)]
+             [is-label (and is-first-string (not (member first-elem sicxe/directive-names)))]
+             [label (if is-label first-elem "")]
+             [len (instr-length (if is-label (cdr l) l))])
+        (append (drop-right res 1) (list (cons label prev) (+ prev len))))))
 
-;; First pass of assembler
+;; First pass of assembler, returns symbols
 (define (first-pass ast)
-  (foldl process-line (list (cons "" 0)) ast))
+  (let ([lines (drop-right (foldl process-line (list 0) ast) 1)]
+        [fn (lambda (i) (non-empty-string? (car i)))])
+    (filter fn lines)))
