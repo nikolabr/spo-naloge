@@ -215,7 +215,8 @@
                                  (list))]
              [location (dict-ref labels label #f)])
         (if location
-            (append (drop-right line 1) (append label-modifier (list location)))
+            (append (drop-right line 1)
+                    (list (append label-modifier (list location))))
             line))))
 
 (define (get-literals ast)
@@ -342,7 +343,6 @@
   )
 
 (define (generate-instr l)
-  (display l)
   (let* ([pc (car l)]
          [instr (cdr l)]
          [operands (last instr)])
@@ -368,6 +368,7 @@
          [resolved (second-pass labels lines)]
          [generated (generate-code resolved)]
          )
+    ;; (display lines)
     generated))
 
 
