@@ -123,7 +123,7 @@
      [(SPACE WORD SPACE array-expr) (list "WORD" $4)]
 
      [(SPACE RESB SPACE SYMBOL) (list "RESB" $4)]
-     [(SPACE RESW SPACE SYMBOL) (list "RESB" $4)]
+     [(SPACE RESW SPACE SYMBOL) (list "RESW" $4)]
      
      [(SPACE INSTR SPACE symbol COMMA SPACE symbol) (list $2 $4 $7)]
      [(SPACE INSTR SPACE symbol) (list $2 $4)]

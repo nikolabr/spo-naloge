@@ -146,42 +146,165 @@
   (if (empty? l)
       0
       (let* ([first-elem (if (or (list? l) (cons? l)) (car l) #f)]
-         [opcode (if (symbol? first-elem)
+             [opcode (if (symbol? first-elem)
                      (eval first-elem)
                      first-elem)]
-         [is-long (and (>= (length l) 2) (is-f4? l))]
-         [rem (remove 'long l)])
+             [is-long (and (>= (length l) 2) (is-f4? l))]
+             [rem (remove 'long l)])
         (cond
           [(member opcode f1-opcodes) 1]
           [(member opcode f2-opcodes) 2]
           [(member opcode sic-opcodes) (if is-long 4 3)]
-      
-          [(member first-elem '("BYTE" "RESB"))
-           (let ([b (parse-array (cdr rem))])
-             (if (bytes? b) (bytes-length b) 1))]
-      
-          [(member first-elem '("WORD" "RESW"))
-           (let ([b (parse-array (cdr rem))])
-             (if (bytes? b) (bytes-length b) 3))]
+
+          [(equal? first-elem "BYTE") (let ([b (parse-array (cdr rem))])
+                                        (if (bytes? b) (bytes-length b) 1))]
+
+          [(equal? first-elem "WORD") (let ([b (parse-array (cdr rem))])
+                                        (if (bytes? b) (bytes-length b) 3))]
+          
+          [(equal? first-elem "RESB") (and (number? (last rem)) (* (last rem) 1))]
+          [(equal? first-elem "RESW") (and (number? (last rem)) (* (last rem) 3))]
 
           [(equal? first-elem "ORG") (second l)]
           
           [else 0]))
       ))
 
-(define (process-line l res)
+(define (starts-with-label l)
+  (let ([first-el (car l)])
+    (and (string? first-el) (not (member first-el sicxe/directive-names)))))
+
+(define (remove-label l)
+  (if (and (not (empty? l))
+           (starts-with-label l)) (cdr l) l))
+
+(define (line-instr-length l)
+  (if (empty? l)
+      0
+      (instr-length (remove-label l))))
+
+(define (first-pass/process-line l res)
   (if (empty? l)
       res
       (let* ([prev (last res)]
-             [first-elem (car l)]
-             [is-first-string (string? first-elem)]
-             [is-label (and is-first-string (not (member first-elem sicxe/directive-names)))]
-             [label (if is-label first-elem "")]
-             [len (instr-length (if is-label (cdr l) l))])
+             [is-label (starts-with-label l)]
+             [label (if is-label (first l) "")]
+             [len (line-instr-length l)])
         (append (drop-right res 1) (list (cons label prev) (+ prev len))))))
 
 ;; First pass of assembler, returns symbols
 (define (first-pass ast)
-  (let ([lines (drop-right (foldl process-line (list 0) ast) 1)]
+  (let ([lines (drop-right (foldl first-pass/process-line (list 0) ast) 1)]
         [fn (lambda (i) (non-empty-string? (car i)))])
     (filter fn lines)))
+
+(define (replace-right-symbol labels line)
+  (if (empty? line)
+      line
+      (let* ([label (last line)]
+             [location (dict-ref labels label #f)])
+        (if location
+            (append (drop-right line 1) (list location))
+            line))))
+
+;; Second pass of assembler
+(define (second-pass labels ast)
+  (map (lambda (i) (replace-right-symbol labels i)) ast))
+
+(define (replace-opcode l)
+  (let ([opcode (second l)])
+    (if (symbol? opcode)
+        (append (list (first l) (eval opcode) (cddr l)))
+        #f)))
+
+(define (process-instr l res)
+  (let* ([prev (last res)]
+         [len (instr-length l)])
+    (append (drop-right res 1) (list (cons prev l) (+ prev len)))))
+
+(define (get-format instr)
+  (let ([opcode (first instr)]
+        [is-long (and (>= (length instr) 2) (is-f4? instr))])
+    (cond
+      [(member opcode f1-opcodes) 'f1]
+      [(member opcode f2-opcodes) 'f2]
+      [(member opcode sic-opcodes) (if is-long 'f4 'f3)]
+      [else #f]
+      )))
+
+(define (get-bp-mode pc base modifier operand)
+  (let* ([pc-after (+ pc 3)]
+         [pc-distance (- operand pc-after)])
+    (cond
+      [(member 'base modifier) (list 'mode-base (- operand base))]
+      [(and (>= pc-distance -2048)
+            (<= pc-distance 2047))
+       (list 'mode-pc-relative pc-distance)]
+      [else (list 'mode-direct operand)])))
+
+(define (get-ni-mode modifier)
+  (cond
+    [(member 'literal modifier) 'literal-mode]
+    [(member 'indirect modifier) 'indirect-mode]
+    [else 'simple-mode]))
+
+(define (index-bits modifier)
+  (if (member 'long modifier) #x008000 #x000000))
+
+(define (extended-bits modifier)
+  (if (member 'index modifier) #x000100 #x000000))
+
+(define mode-direct #x000000)
+(define mode-pc-relative #x002000)
+(define mode-base #x004000)
+
+(define literal-mode #x010000)
+(define indirect-mode #x020000)
+(define simple-mode #x030000)
+
+(define (calculate-nixbpe-bits pc base modifier operand)
+  (let ([bp-mode (get-bp-mode pc base (list) operand)]
+        [ni-mode (get-ni-mode (list))]
+        [e (extended-bits modifier)]
+        [x (index-bits modifier)])
+    (bitwise-ior
+     #x000000
+     (eval (first bp-mode))
+     (eval ni-mode)
+     e
+     x)))
+
+(define (generate-f3 pc base modifier opcode operand)
+  ;; (display opcode)
+  ;; (display "\n")
+  
+  (let ([nixbpe (calculate-nixbpe-bits pc base modifier operand)]
+        [operand (second (get-bp-mode pc base modifier operand))])
+    (bitwise-ior
+     (arithmetic-shift opcode 16)
+     nixbpe
+     (bitwise-and operand #xFFF))))
+
+(define (generate-instr l)
+  (let ([pc (car l)]
+        [instr (cdr l)])
+    (match (get-format instr)
+      ['f3 (generate-f3 pc #f (list) (car instr) (last (last instr)))]
+      [_ (error "Unknown or unsupported format!")])))
+
+(define (generate-code ast)
+  (let* ([not-empty (filter (lambda (i) (not (empty? i))) ast)]
+         [removed-labels (map remove-label not-empty)]
+         [instr-locs (drop-right (foldl process-instr (list 0) removed-labels) 1)]
+         [ops-with-locs (filter-map replace-opcode instr-locs)]
+         [generated-code (map generate-instr ops-with-locs)]
+         )
+    generated-code))
+
+(define (assemble p)
+  (let* ([lines (sicxe/parse p)]
+         [labels (first-pass lines)]
+         [resolved (second-pass labels lines)]
+         [generated (generate-code resolved)])
+    generated))
+
