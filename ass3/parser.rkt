@@ -114,7 +114,7 @@
      [(SPACE ORG SPACE SYMBOL) (list "ORG" $4)]
      
      [(SPACE EQU SPACE SYMBOL) (list "EQU" $4)]
-     [(SPACE EQU SPACE ASTERISK) (list "EQU" "*")]
+     ;; [(SPACE EQU SPACE ASTERISK) (list "EQU" "*")]
 
      [(SPACE BYTE SPACE SYMBOL) (list "BYTE" $4)]
      [(SPACE BYTE SPACE array-expr) (list "BYTE" $4)]

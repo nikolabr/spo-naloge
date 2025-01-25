@@ -1,6 +1,7 @@
 #lang racket
 
 (require "parser.rkt")
+(require "emitter.rkt")
 
 (define f1-opcodes (list))
 
@@ -146,7 +147,7 @@
           ["X" (hex-array->bytes content)]
           [_ (error "Unknown array type")]))))
 
-(define (instr-length l)
+(define (instr-length l prev)
   (if (empty? l)
       0
       (let* ([first-elem (if (or (list? l) (cons? l)) (car l) #f)]
@@ -169,7 +170,7 @@
           [(equal? first-elem "RESB") (and (number? (last rem)) (* (last rem) 1))]
           [(equal? first-elem "RESW") (and (number? (last rem)) (* (last rem) 3))]
 
-          [(equal? first-elem "ORG") (second l)]
+          [(equal? first-elem "ORG") (- (second l) prev)]
           
           [else 0]))
       ))
@@ -182,10 +183,10 @@
   (if (and (not (empty? l))
            (starts-with-label l)) (cdr l) l))
 
-(define (line-instr-length l)
+(define (line-instr-length l prev)
   (if (empty? l)
       0
-      (instr-length (remove-label l))))
+      (instr-length (remove-label l) prev)))
 
 (define (first-pass/process-line l res)
   (if (empty? l)
@@ -193,7 +194,7 @@
       (let* ([prev (last res)]
              [is-label (starts-with-label l)]
              [label (if is-label (first l) "")]
-             [len (line-instr-length l)])
+             [len (line-instr-length l prev)])
         (append (drop-right res 1) (list (cons label prev) (+ prev len))))))
 
 ;; First pass of assembler, returns symbols
@@ -205,11 +206,24 @@
 (define (replace-right-symbol labels line)
   (if (empty? line)
       line
-      (let* ([label (last line)]
+      (let* ([last-el (last line)]
+             [label (if (list? (last line))
+                        (last last-el)
+                        last-el)]
+             [label-modifier (if (list? (last line))
+                                 (list (first last-el))
+                                 (list))]
              [location (dict-ref labels label #f)])
         (if location
-            (append (drop-right line 1) (list location))
+            (append (drop-right line 1) (append label-modifier (list location)))
             line))))
+
+(define (get-literals ast)
+  (let ([fn (lambda (i)
+              (match i
+                [(list label "EQU" num) (cons label num)]
+                [_ #f]))])
+    (filter-map fn ast)))
 
 ;; Second pass of assembler
 (define (second-pass labels ast)
@@ -218,12 +232,12 @@
 (define (replace-opcode l)
   (let ([opcode (second l)])
     (if (symbol? opcode)
-        (append (list (first l) (eval opcode) (cddr l)))
+        (append (take l 1) (list (eval opcode)) (drop l 2))
         #f)))
 
 (define (process-instr l res)
   (let* ([prev (last res)]
-         [len (instr-length l)])
+         [len (instr-length l prev)])
     (append (drop-right res 1) (list (cons prev l) (+ prev len)))))
 
 (define (get-format instr)
@@ -236,19 +250,28 @@
       [else #f]
       )))
 
-(define (get-bp-mode pc len base modifier operand)
+(define (get-bp-mode pc len base modifier operands)
   (let* ([pc-after (+ pc len)]
-         [pc-distance (- operand pc-after)])
+         [operand (if (list? operands) (last operands) operands)])
     (cond
+      [(and (list? operands)
+            (member 'literal operands)) (list 'mode-direct operand)]
       [(member 'long modifier) (list 'mode-direct operand)]
-      [(member 'base modifier) (list 'mode-base (- operand base))]
-      [(and (>= pc-distance -2048)
-            (<= pc-distance 2047))
-       (list 'mode-pc-relative pc-distance)]
-      [else (list 'mode-direct operand)])))
+      [(and (member 'base modifier)
+            (>= (- operand base) 0)
+            (< (- operand base) 4096))
+       (list 'mode-base (- operand base))]
+      [(and (>= (- operand pc-after) -2048)
+            (<= (- operand pc-after) 2047))
+       (list 'mode-pc-relative (- operand pc-after))]
+      [(and (>= operand 0)
+            (< operand 4096))
+       (list 'mode-direct operand)]
+      [else (error "Operand invalid")])))
 
 (define (get-ni-mode modifier)
   (cond
+    [(not (list? modifier)) 'simple-mode]
     [(member 'literal modifier) 'literal-mode]
     [(member 'indirect modifier) 'indirect-mode]
     [else 'simple-mode]))
@@ -269,7 +292,7 @@
 
 (define (calculate-nixbpe-bits pc len base modifier operand)
   (let ([bp-mode (get-bp-mode pc len base modifier operand)]
-        [ni-mode (get-ni-mode modifier)]
+        [ni-mode (get-ni-mode operand)]
         [e (extended-bits modifier)]
         [x (index-bits modifier)])
     (bitwise-ior
@@ -310,7 +333,6 @@
      (bitwise-and operand #xFFF))))
 
 (define (generate-f4 pc base modifier opcode operand)
-  ;; (display "F4\n")
   (let ([nixbpe (calculate-nixbpe-bits 4 pc base modifier operand)]
         [operand (second (get-bp-mode 4 pc base modifier operand))])
     (bitwise-ior
@@ -320,12 +342,14 @@
   )
 
 (define (generate-instr l)
-  (let ([pc (car l)]
-        [instr (cdr l)])
+  (display l)
+  (let* ([pc (car l)]
+         [instr (cdr l)]
+         [operands (last instr)])
     (match (get-format instr)
       ['f2 (generate-f2 (first instr) (last instr))]
-      ['f3 (generate-f3 pc #f (take (last instr) 1) (car instr) (last (last instr)))]
-      ['f4 (generate-f4 pc #f (take (last instr) 1) (car instr) (last (last instr)))]
+      ['f3 (generate-f3 pc #f (list (second instr)) (car instr) operands)]
+      ['f4 (generate-f4 pc #f (list (second instr)) (car instr) operands)]
       [_ (error "Unknown or unsupported format!")])))
 
 (define (generate-code ast)
@@ -333,14 +357,17 @@
          [removed-labels (map remove-label not-empty)]
          [instr-locs (drop-right (foldl process-instr (list 0) removed-labels) 1)]
          [ops-with-locs (filter-map replace-opcode instr-locs)]
-         [generated (map generate-instr ops-with-locs)]
+         ;; [generated ]
          )
-    generated))
+    (map generate-instr ops-with-locs)))
 
 (define (assemble p)
   (let* ([lines (sicxe/parse p)]
-         [labels (first-pass lines)]
+         [labels (append (first-pass lines)
+                         (get-literals lines))]
          [resolved (second-pass labels lines)]
-         [generated (generate-code resolved)])
+         [generated (generate-code resolved)]
+         )
     generated))
+
 
