@@ -119,8 +119,12 @@
         op-wd
         ))
 
+;; Word (as integer) to bytes
+(define (word-to-bytes word)
+  (subbytes (integer->integer-bytes word 4 #f #t) 1))
+
 (define (is-f4? l)
-  (and (not (empty? l)) (equal? (second l) 'long)))
+  (and (not (empty? l)) (list? (second l)) (member 'long (second l))))
 
 (define (hex-array->bytes s)
   (let ([l (bytes->list (string->bytes/utf-8 s))]
@@ -232,10 +236,11 @@
       [else #f]
       )))
 
-(define (get-bp-mode pc base modifier operand)
-  (let* ([pc-after (+ pc 3)]
+(define (get-bp-mode pc len base modifier operand)
+  (let* ([pc-after (+ pc len)]
          [pc-distance (- operand pc-after)])
     (cond
+      [(member 'long modifier) (list 'mode-direct operand)]
       [(member 'base modifier) (list 'mode-base (- operand base))]
       [(and (>= pc-distance -2048)
             (<= pc-distance 2047))
@@ -248,11 +253,11 @@
     [(member 'indirect modifier) 'indirect-mode]
     [else 'simple-mode]))
 
-(define (index-bits modifier)
-  (if (member 'long modifier) #x008000 #x000000))
-
 (define (extended-bits modifier)
-  (if (member 'index modifier) #x000100 #x000000))
+  (if (member 'long modifier) #x001000 #x000000))
+
+(define (index-bits modifier)
+  (if (member 'index modifier) #x008000 #x000000))
 
 (define mode-direct #x000000)
 (define mode-pc-relative #x002000)
@@ -262,9 +267,9 @@
 (define indirect-mode #x020000)
 (define simple-mode #x030000)
 
-(define (calculate-nixbpe-bits pc base modifier operand)
-  (let ([bp-mode (get-bp-mode pc base (list) operand)]
-        [ni-mode (get-ni-mode (list))]
+(define (calculate-nixbpe-bits pc len base modifier operand)
+  (let ([bp-mode (get-bp-mode pc len base modifier operand)]
+        [ni-mode (get-ni-mode modifier)]
         [e (extended-bits modifier)]
         [x (index-bits modifier)])
     (bitwise-ior
@@ -274,22 +279,53 @@
      e
      x)))
 
+(define reg-a 0)
+(define reg-x 1)
+(define reg-l 2)
+(define reg-b 3)
+(define reg-s 4)
+(define reg-t 5)
+(define reg-f 6)
+
+(define (generate-f2 opcode operands)
+  (let* ([to-symbol (lambda (n) (eval (string->symbol
+                                       (string-append "reg-" (string-downcase n)))))]
+         [first-op (to-symbol (first operands))]
+         [second-op (if (> (length operands) 1)
+                        (to-symbol (second operands))
+                        0)])
+    (bitwise-ior
+     (arithmetic-shift opcode 8)
+     (arithmetic-shift first-op 4)
+     second-op
+     ))
+  )
+
 (define (generate-f3 pc base modifier opcode operand)
-  ;; (display opcode)
-  ;; (display "\n")
-  
-  (let ([nixbpe (calculate-nixbpe-bits pc base modifier operand)]
-        [operand (second (get-bp-mode pc base modifier operand))])
+  (let ([nixbpe (calculate-nixbpe-bits 3 pc base modifier operand)]
+        [operand (second (get-bp-mode 3 pc base modifier operand))])
     (bitwise-ior
      (arithmetic-shift opcode 16)
      nixbpe
      (bitwise-and operand #xFFF))))
 
+(define (generate-f4 pc base modifier opcode operand)
+  ;; (display "F4\n")
+  (let ([nixbpe (calculate-nixbpe-bits 4 pc base modifier operand)]
+        [operand (second (get-bp-mode 4 pc base modifier operand))])
+    (bitwise-ior
+     (arithmetic-shift opcode 24)
+     (arithmetic-shift nixbpe 8)
+     (bitwise-and operand #xFFFFF)))
+  )
+
 (define (generate-instr l)
   (let ([pc (car l)]
         [instr (cdr l)])
     (match (get-format instr)
-      ['f3 (generate-f3 pc #f (list) (car instr) (last (last instr)))]
+      ['f2 (generate-f2 (first instr) (last instr))]
+      ['f3 (generate-f3 pc #f (take (last instr) 1) (car instr) (last (last instr)))]
+      ['f4 (generate-f4 pc #f (take (last instr) 1) (car instr) (last (last instr)))]
       [_ (error "Unknown or unsupported format!")])))
 
 (define (generate-code ast)
@@ -297,9 +333,9 @@
          [removed-labels (map remove-label not-empty)]
          [instr-locs (drop-right (foldl process-instr (list 0) removed-labels) 1)]
          [ops-with-locs (filter-map replace-opcode instr-locs)]
-         [generated-code (map generate-instr ops-with-locs)]
+         [generated (map generate-instr ops-with-locs)]
          )
-    generated-code))
+    generated))
 
 (define (assemble p)
   (let* ([lines (sicxe/parse p)]

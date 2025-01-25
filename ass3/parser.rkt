@@ -128,12 +128,12 @@
      [(SPACE INSTR SPACE symbol COMMA SPACE symbol) (list $2 $4 $7)]
      [(SPACE INSTR SPACE symbol) (list $2 $4)]
      [(SPACE INSTR) (list $2)]
-
+          
      [(SPACE modifier INSTR SPACE symbol COMMA SPACE symbol) (list $3 $2 $5 $8)]
      [(SPACE modifier INSTR SPACE symbol) (list $3 $2 $5)]
 
      [(SYMBOL line) (cons $1 $2)]
-
+          
      [(SPACE) '()]
      [() '()]]
     [lines
