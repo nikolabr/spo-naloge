@@ -125,7 +125,7 @@
   (subbytes (integer->integer-bytes word 4 #f #t) 1))
 
 (define (is-f4? l)
-  (and (not (empty? l)) (list? (second l)) (member 'long (second l))))
+  (and (not (empty? l)) (list? l) (member 'long l)))
 
 (define (hex-array->bytes s)
   (let ([l (bytes->list (string->bytes/utf-8 s))]
@@ -320,64 +320,83 @@
          [second-op (if (> (length operands) 1)
                         (to-symbol (second operands))
                         0)])
-    (bitwise-ior
-     (arithmetic-shift opcode 8)
-     (arithmetic-shift first-op 4)
-     second-op
-     ))
+    (integer->integer-bytes
+     (bitwise-ior
+      (arithmetic-shift opcode 8)
+      (arithmetic-shift first-op 4)
+      second-op
+      )
+     2 #f #t))
   )
 
 (define (generate-f3 pc base modifier opcode operand)
+  ;; (display "F3")
   (let ([nixbpe (calculate-nixbpe-bits 3 pc base modifier operand)]
         [operand (match opcode
                    [(== op-rsub) #x0]
                    [_ (second (get-bp-mode 3 pc base modifier operand))] )])
-    (bitwise-ior
-     (arithmetic-shift opcode 16)
-     nixbpe
-     (bitwise-and operand #xFFF))))
+    (subbytes
+     (integer->integer-bytes
+      (bitwise-ior
+       (arithmetic-shift opcode 16)
+       nixbpe
+       (bitwise-and operand #xFFF))
+      4 #f #t) 1)))
 
 (define (generate-f4 pc base modifier opcode operand)
+  ;; (display "F4")
   (let ([nixbpe (calculate-nixbpe-bits 4 pc base modifier operand)]
         [operand (second (get-bp-mode 4 pc base modifier operand))])
-    (bitwise-ior
-     (arithmetic-shift opcode 24)
-     (arithmetic-shift nixbpe 8)
-     (bitwise-and operand #xFFFFF)))
+    (integer->integer-bytes
+     (bitwise-ior
+      (arithmetic-shift opcode 24)
+      (arithmetic-shift nixbpe 8)
+      (bitwise-and operand #xFFFFF))
+     4 #f #t))
   )
 
 (define (generate-instr l)
-  ;; (display l)
-  ;; (display "\n")
   (let* ([pc (car l)]
          [instr (cdr l)]
          [operands (last instr)]
          [instr-modifiers (if (> (length instr) 1)
                               (list (second instr))
                               (list))])
-    (match (get-format instr)
-      ['f2 (generate-f2 (first instr) (cdr instr))]
-      ['f3 (generate-f3 pc #f instr-modifiers (car instr) operands)]
-      ['f4 (generate-f4 pc #f instr-modifiers (car instr) operands)]
-      [_ (error "Unknown or unsupported format!")])))
+    (cons pc
+     (match (get-format instr)
+       ['f2 (generate-f2 (first instr) (cdr instr))]
+       ['f3 (generate-f3 pc #f instr-modifiers (car instr) operands)]
+       ['f4 (generate-f4 pc #f instr-modifiers (car instr) operands)]
+       [_ (error "Unknown or unsupported format!")]))))
 
 (define (generate-code ast)
   (let* ([not-empty (filter (lambda (i) (not (empty? i))) ast)]
          [removed-labels (map remove-label not-empty)]
          [instr-locs (drop-right (foldl process-instr (list 0) removed-labels) 1)]
          [ops-with-locs (filter-map replace-opcode instr-locs)]
-         ;; [generated ]
          )
     (map generate-instr ops-with-locs)))
 
-(define (assemble p)
+(define (assemble p o)
   (let* ([lines (sicxe/parse p)]
          [labels (append (first-pass lines)
                          (get-literals lines))]
          [resolved (second-pass labels lines)]
          [generated (generate-code resolved)]
          )
-    (display labels)
-    generated))
+    (create-object-file o
+                        ""
+                        0
+                        (apply + (map (lambda (i) (bytes-length (cdr i)))
+                                      generated))
+                        0
+                        generated)))
 
-
+(define (assemble-file in-filename out-filename)
+  (with-output-to-file out-filename
+    #:exists 'replace
+    (lambda ()
+      (with-input-from-file in-filename
+        (lambda ()
+          (assemble (current-input-port)
+                    (current-output-port)))))))

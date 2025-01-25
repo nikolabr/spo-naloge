@@ -42,10 +42,13 @@
                       #:pad-string "0")])
     (string-append "E" addr-str)))
 
-(define (create-object-file name code-addr code-length start-addr instructions)
-  (string-append
-   (create-head-record name code-addr code-length)
-   "\n"
-   " "
-   "\n"
-   (create-end-record start-addr)))
+(define (print-instruction instr p)
+  (display (create-text-record (car instr) (cdr instr)) p)
+  (display "\n" p))
+
+(define (create-object-file p name code-addr code-length start-addr instructions)
+  (display (create-head-record name code-addr code-length) p)
+  (display "\n" p)
+  (map (lambda (i) (print-instruction i p)) instructions)
+  (display (create-end-record start-addr) p)
+  )
