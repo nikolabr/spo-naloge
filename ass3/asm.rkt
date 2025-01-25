@@ -213,8 +213,10 @@
              [label-modifier (if (list? (last line))
                                  (list (first last-el))
                                  (list))]
-             [location (dict-ref labels label #f)])
-        (if location
+             [location (dict-ref labels label #f)]
+             [opcode (first line)])
+        (if (and location
+                 (not (member (eval opcode) f2-opcodes)))
             (append (drop-right line 1)
                     (list (append label-modifier (list location))))
             line))))
@@ -327,7 +329,9 @@
 
 (define (generate-f3 pc base modifier opcode operand)
   (let ([nixbpe (calculate-nixbpe-bits 3 pc base modifier operand)]
-        [operand (second (get-bp-mode 3 pc base modifier operand))])
+        [operand (match opcode
+                   [(== op-rsub) #x0]
+                   [_ (second (get-bp-mode 3 pc base modifier operand))] )])
     (bitwise-ior
      (arithmetic-shift opcode 16)
      nixbpe
@@ -343,13 +347,18 @@
   )
 
 (define (generate-instr l)
+  ;; (display l)
+  ;; (display "\n")
   (let* ([pc (car l)]
          [instr (cdr l)]
-         [operands (last instr)])
+         [operands (last instr)]
+         [instr-modifiers (if (> (length instr) 1)
+                              (list (second instr))
+                              (list))])
     (match (get-format instr)
-      ['f2 (generate-f2 (first instr) (last instr))]
-      ['f3 (generate-f3 pc #f (list (second instr)) (car instr) operands)]
-      ['f4 (generate-f4 pc #f (list (second instr)) (car instr) operands)]
+      ['f2 (generate-f2 (first instr) (cdr instr))]
+      ['f3 (generate-f3 pc #f instr-modifiers (car instr) operands)]
+      ['f4 (generate-f4 pc #f instr-modifiers (car instr) operands)]
       [_ (error "Unknown or unsupported format!")])))
 
 (define (generate-code ast)
@@ -368,7 +377,7 @@
          [resolved (second-pass labels lines)]
          [generated (generate-code resolved)]
          )
-    ;; (display lines)
+    (display labels)
     generated))
 
 
