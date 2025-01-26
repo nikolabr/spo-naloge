@@ -4,6 +4,8 @@
 (require (prefix-in : parser-tools/lex-sre))
 (require parser-tools/yacc)
 
+(require "opcode.rkt")
+
 (provide sicxe/lexer)
 (provide sicxe/parser)
 (provide sicxe/parse)
@@ -125,7 +127,15 @@
      [(SPACE RESB SPACE SYMBOL) (list "RESB" $4)]
      [(SPACE RESW SPACE SYMBOL) (list "RESW" $4)]
      
-     [(SPACE INSTR SPACE symbol COMMA SPACE symbol) (list $2 $4 $7)]
+     [(SPACE INSTR SPACE symbol COMMA SPACE symbol)
+      (cond
+        [(and (equal? "X" $7)
+              (not (and
+                    (symbol? $2)
+                    (member (eval $2) f2-opcodes))))
+         (list $2 (list 'index $4))
+         ]
+        [else (list $2 $4 $7)])]
      [(SPACE INSTR SPACE symbol) (list $2 $4)]
      [(SPACE INSTR) (list $2)]
           
