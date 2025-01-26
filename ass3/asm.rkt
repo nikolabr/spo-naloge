@@ -359,3 +359,74 @@
         (lambda ()
           (assemble (current-input-port)
                     (current-output-port)))))))
+
+(define (display-listing l o lines text)
+  (display (~r (car l) #:base 16 #:min-width 6 #:pad-string "0") o)
+  (display " " o)
+  (display (apply string-append
+                (map (lambda (i)
+                       (~r i #:base 16 #:min-width 2 #:pad-string "0"))
+                     (bytes->list (cdr l)))) o)
+  (display " " o)
+  ;; (let ([m (assoc (car l) lines)])
+  ;;   (if m
+  ;;       (display (list-ref text (cdr m)) o)
+  ;;       #f))
+  (map (lambda (i)
+         (display (list-ref text (cdr i)))
+         (display "\n"))
+       (filter
+        (lambda (i)
+          (= (car i) (car l)))
+        lines))
+  (display "\n" o)
+  )
+
+(define (print-listing p o text)
+  (let* ([lines (filter (lambda (i) (not (empty? i))) (sicxe/parse p))]
+         [labels (append (first-pass lines)
+                         (get-literals lines))]
+         [resolved (second-pass labels lines)]
+         [line-location (drop-right (foldl (lambda (l res)
+                                  (let* ([prev (last res)]
+                                         [len (line-instr-length l prev)])
+                                    (append
+                                     (drop-right res 1)
+                                     (list (cons prev
+                                                 (- (length res) 1)))
+                                     (list (+ prev len))))
+                                  ) (list 0)
+                                resolved) 1)]
+         [code (generate-code resolved)]
+         [variables (generate-variables lines)])
+    (map (lambda (i) (display-listing i o line-location text))
+         (append code variables)))
+  #t)
+
+(define (read-port-lines)
+  (let ([l (read-line)])
+    (if (equal? l eof)
+        (list)
+        (append (list l)
+                (read-port-lines)))))
+
+(define (get-file-lines in-file)
+  (filter
+   (lambda (i) (and
+                (not (empty? i))
+                (not (regexp-match-exact? #rx"[ \t\n]*" i))))
+   (with-input-from-file in-file
+     (lambda ()
+       (let ([text (read-port-lines)])
+         text)))))
+
+(define (print-file-listing in-filename out-filename)
+  (let ([in-text (get-file-lines in-filename)])
+    (with-output-to-file out-filename
+      #:exists 'replace
+      (lambda ()
+        (with-input-from-file in-filename
+          (lambda ()
+            (print-listing (current-input-port)
+                           (current-output-port)
+                           in-text)))))))
