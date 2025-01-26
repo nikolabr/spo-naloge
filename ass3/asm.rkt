@@ -388,15 +388,15 @@
                          (get-literals lines))]
          [resolved (second-pass labels lines)]
          [line-location (drop-right (foldl (lambda (l res)
-                                  (let* ([prev (last res)]
-                                         [len (line-instr-length l prev)])
-                                    (append
-                                     (drop-right res 1)
-                                     (list (cons prev
-                                                 (- (length res) 1)))
-                                     (list (+ prev len))))
-                                  ) (list 0)
-                                resolved) 1)]
+                                             (let* ([prev (last res)]
+                                                    [len (line-instr-length l prev)])
+                                               (append
+                                                (drop-right res 1)
+                                                (list (cons prev
+                                                            (- (length res) 1)))
+                                                (list (+ prev len))))
+                                             ) (list 0)
+                                           resolved) 1)]
          [code (generate-code resolved)]
          [variables (generate-variables lines)])
     (map (lambda (i) (display-listing i o line-location text))
