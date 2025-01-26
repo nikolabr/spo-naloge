@@ -377,20 +377,50 @@
          )
     (map generate-instr ops-with-locs)))
 
+(define (parse-variable line)
+  (let ([pc (first line)])
+    (match (cdr line)
+      [(list "WORD" arr)
+       (let ([a (parse-array arr)])
+         (cons pc
+               (if (bytes? a)
+                   a
+                   (subbytes (integer->integer-bytes a 4 #f #t) 1))))]
+      [(list "BYTE" arr)
+       (let ([a (parse-array arr)])
+         (cons pc
+               (if (bytes? a)
+                   a
+                   (bytes a))))]
+
+      [(list "RESB" n) (cons pc (make-bytes n))]
+      [(list "RESW" n) (cons pc (make-bytes (* n 3)))]
+      
+      [_ #f])))
+
+(define (generate-variables ast)
+   (let* ([not-empty (filter (lambda (i) (not (empty? i))) ast)]
+          [removed-labels (map remove-label not-empty)]
+          [instr-locs (drop-right (foldl process-instr (list 0) removed-labels) 1)])
+     (filter-map parse-variable
+                 instr-locs)))
+
 (define (assemble p o)
   (let* ([lines (sicxe/parse p)]
          [labels (append (first-pass lines)
                          (get-literals lines))]
          [resolved (second-pass labels lines)]
-         [generated (generate-code resolved)]
+         [code (generate-code resolved)]
+         [variables (generate-variables lines)]
          )
     (create-object-file o
                         ""
                         0
                         (apply + (map (lambda (i) (bytes-length (cdr i)))
-                                      generated))
+                                      code))
                         0
-                        generated)))
+                        (append code
+                                variables))))
 
 (define (assemble-file in-filename out-filename)
   (with-output-to-file out-filename
