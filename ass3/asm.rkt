@@ -330,7 +330,6 @@
   )
 
 (define (generate-f3 pc base modifier opcode operand)
-  ;; (display "F3")
   (let ([nixbpe (calculate-nixbpe-bits 3 pc base modifier operand)]
         [operand (match opcode
                    [(== op-rsub) #x0]
@@ -344,7 +343,6 @@
       4 #f #t) 1)))
 
 (define (generate-f4 pc base modifier opcode operand)
-  ;; (display "F4")
   (let ([nixbpe (calculate-nixbpe-bits 4 pc base modifier operand)]
         [operand (second (get-bp-mode 4 pc base modifier operand))])
     (integer->integer-bytes
@@ -369,6 +367,30 @@
        ['f4 (generate-f4 pc #f instr-modifiers (car instr) operands)]
        [_ (error "Unknown or unsupported format!")]))))
 
+(define (generate-mod-record l)
+  (let* ([pc (car l)]
+         [instr (cdr l)]
+         [operands (last instr)]
+         [instr-modifiers (if (> (length instr) 1)
+                              (list (second instr))
+                              (list))]
+         [len (match (get-format instr)
+                   ['f3 3]
+                   ['f4 4]
+                   [_ 0])]
+         [mode (if (> len 0)
+                   (get-bp-mode pc len #f instr-modifiers operands)
+                   (list))]
+         [record-len (match len
+                       [3 3]
+                       [4 5]
+                       [_ 0])])
+    (if (and (member 'mode-direct mode)
+             (not (member 'literal operands)))
+        (list (+ pc 1)
+              record-len)
+        #f)))
+
 (define (generate-code ast)
   (let* ([not-empty (filter (lambda (i) (not (empty? i))) ast)]
          [removed-labels (map remove-label not-empty)]
@@ -376,6 +398,13 @@
          [ops-with-locs (filter-map replace-opcode instr-locs)]
          )
     (map generate-instr ops-with-locs)))
+
+(define (generate-mod-records ast)
+  (let* ([not-empty (filter (lambda (i) (not (empty? i))) ast)]
+         [removed-labels (map remove-label not-empty)]
+         [instr-locs (drop-right (foldl process-instr (list 0) removed-labels) 1)]
+         [ops-with-locs (filter-map replace-opcode instr-locs)])
+    (filter-map generate-mod-record ops-with-locs)))
 
 (define (parse-variable line)
   (let ([pc (first line)])
@@ -412,15 +441,18 @@
          [resolved (second-pass labels lines)]
          [code (generate-code resolved)]
          [variables (generate-variables lines)]
-         )
+         [mod-records (generate-mod-records resolved)])
     (create-object-file o
                         ""
                         0
-                        (apply + (map (lambda (i) (bytes-length (cdr i)))
-                                      code))
+                        (max (car (last code))
+                             (if (empty? variables)
+                                 0
+                                 (car (last variables))))
                         0
                         (append code
-                                variables))))
+                                variables)
+                        mod-records)))
 
 (define (assemble-file in-filename out-filename)
   (with-output-to-file out-filename
@@ -430,3 +462,14 @@
         (lambda ()
           (assemble (current-input-port)
                     (current-output-port)))))))
+
+
+
+
+
+
+
+
+
+
+
