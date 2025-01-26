@@ -4,6 +4,8 @@
 (require "parser.rkt")
 (require "emitter.rkt")
 
+(define base-addr #f)
+
 ;; Word (as integer) to bytes
 (define (word-to-bytes word)
   (subbytes (integer->integer-bytes word 4 #f #t) 1))
@@ -61,7 +63,8 @@
 
 (define (starts-with-label l)
   (let ([first-el (car l)])
-    (and (string? first-el) (not (member first-el sicxe/directive-names)))))
+    (and (string? first-el)
+         (not (member first-el sicxe/directive-names)))))
 
 (define (remove-label l)
   (if (and (not (empty? l))
@@ -118,9 +121,12 @@
 
 (define (replace-opcode l)
   (let ([opcode (second l)])
-    (if (symbol? opcode)
-        (append (take l 1) (list (eval opcode)) (drop l 2))
-        #f)))
+    (cond
+      [(symbol? opcode) (append (take l 1) (list (eval opcode)) (drop l 2))]
+      [(equal? opcode "BASE") l]
+      [(equal? opcode "NOBASE") l]
+      [else #f])
+    ))
 
 (define (process-instr l res)
   (let* ([prev (last res)]
@@ -146,7 +152,7 @@
       [(and (list? operands)
             (member 'literal operands)) (list 'mode-direct operand)]
       [(member 'long modifier) (list 'mode-direct operand)]
-      [(and (member 'base modifier)
+      [(and base
             (>= (- operand base) 0)
             (< (- operand base) 4096))
        (list 'mode-base (- operand base))]
@@ -169,7 +175,8 @@
   (if (member 'long modifier) #x001000 #x000000))
 
 (define (index-bits modifier)
-  (if (member 'index modifier) #x008000 #x000000))
+  (if (and (list? modifier)
+           (member 'index modifier)) #x008000 #x000000))
 
 (define mode-direct #x000000)
 (define mode-pc-relative #x002000)
@@ -240,20 +247,24 @@
   )
 
 (define (generate-instr l)
-  (display l)
-  (display "\n")
-  (let* ([pc (car l)]
-         [instr (cdr l)]
-         [operands (last instr)]
-         [instr-modifiers (if (> (length instr) 1)
-                              (list (second instr))
-                              (list))])
-    (cons pc
-          (match (get-format instr)
-            ['f2 (generate-f2 (first instr) (cdr instr))]
-            ['f3 (generate-f3 pc #f instr-modifiers (car instr) operands)]
-            ['f4 (generate-f4 pc #f instr-modifiers (car instr) operands)]
-            [_ (error "Unknown or unsupported format!")]))))
+  (cond
+    [(equal? (second l) "BASE") (set! base-addr (last l))
+                                #f]
+    [(equal? (second l) "NOBASE") (set! base-addr #f)
+                                  #f]
+    [else (let* ([pc (car l)]
+           [instr (cdr l)]
+           [operands (last instr)]
+           [instr-modifiers (if (> (length instr) 1)
+                                (list (second instr))
+                                (list))])
+            (cons pc
+            (match (get-format instr)
+              ['f2 (generate-f2 (first instr) (cdr instr))]
+              ['f3 (generate-f3 pc base-addr instr-modifiers (car instr) operands)]
+              ['f4 (generate-f4 pc base-addr instr-modifiers (car instr) operands)]
+              [_ (error "Unknown or unsupported format!")])))]
+    ))
 
 (define (generate-mod-record l)
   (let* ([pc (car l)]
@@ -274,22 +285,21 @@
                        [4 5]
                        [_ 0])])
     (if (and (member 'mode-direct mode)
+             (list? operands)
              (not (member 'literal operands)))
         (list (+ pc 1)
               record-len)
         #f)))
 
 (define (generate-code ast)
-  (let* ([not-empty (filter (lambda (i) (not (empty? i))) ast)]
-         [removed-labels (map remove-label not-empty)]
+  (let* ([removed-labels (map remove-label ast)]
          [instr-locs (drop-right (foldl process-instr (list 0) removed-labels) 1)]
          [ops-with-locs (filter-map replace-opcode instr-locs)]
          )
-    (map generate-instr ops-with-locs)))
+    (filter-map generate-instr ops-with-locs)))
 
 (define (generate-mod-records ast)
-  (let* ([not-empty (filter (lambda (i) (not (empty? i))) ast)]
-         [removed-labels (map remove-label not-empty)]
+  (let* ([removed-labels (map remove-label ast)]
          [instr-locs (drop-right (foldl process-instr (list 0) removed-labels) 1)]
          [ops-with-locs (filter-map replace-opcode instr-locs)])
     (filter-map generate-mod-record ops-with-locs)))
@@ -316,14 +326,13 @@
       [_ #f])))
 
 (define (generate-variables ast)
-   (let* ([not-empty (filter (lambda (i) (not (empty? i))) ast)]
-          [removed-labels (map remove-label not-empty)]
+   (let* ([removed-labels (map remove-label ast)]
           [instr-locs (drop-right (foldl process-instr (list 0) removed-labels) 1)])
      (filter-map parse-variable
                  instr-locs)))
 
 (define (assemble p o)
-  (let* ([lines (sicxe/parse p)]
+  (let* ([lines (filter (lambda (i) (not (empty? i))) (sicxe/parse p))]
          [labels (append (first-pass lines)
                          (get-literals lines))]
          [resolved (second-pass labels lines)]

@@ -12,10 +12,10 @@
 (provide sicxe/get-tokens)
 (provide sicxe/directive-names)
 
-(define sicxe/directive-names (list "START" "END" "ORG" "EQU" "BYTE" "WORD" "RESB" "RESW"))
+(define sicxe/directive-names (list "START" "END" "ORG" "EQU" "BYTE" "WORD" "RESB" "RESW" "BASE" "NOBASE"))
 
 (define-tokens basic-tokens (SYMBOL INSTR))
-(define-empty-tokens directives (START END ORG EQU BYTE WORD RESB RESW))
+(define-empty-tokens directives (START END ORG EQU BYTE WORD RESB RESW BASE NOBASE))
 (define-empty-tokens punct-tokens (NLINE EOF DOT SPACE COMMA ASTERISK MINUS PLUS LITERAL AT SINGLEQUOTE))
 
 (define sicxe/lexer
@@ -43,6 +43,9 @@
 
    ["RESB" (token-RESB)]
    ["RESW" (token-RESW)]
+
+   ["BASE" (token-BASE)]
+   ["NOBASE" (token-NOBASE)]
 
    [(union
      "ADD" "ADDF" "ADDR" "AND" "CLEAR"
@@ -126,6 +129,9 @@
 
      [(SPACE RESB SPACE SYMBOL) (list "RESB" $4)]
      [(SPACE RESW SPACE SYMBOL) (list "RESW" $4)]
+
+     [(SPACE BASE SPACE SYMBOL) (list "BASE" $4)]
+     [(SPACE NOBASE) (list "NOBASE")]
      
      [(SPACE INSTR SPACE symbol COMMA SPACE symbol)
       (cond
