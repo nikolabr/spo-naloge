@@ -4,6 +4,24 @@
 (require "parser.rkt")
 (require "emitter.rkt")
 
+(provide (all-from-out "opcode.rkt"))
+(provide (all-from-out "parser.rkt"))
+(provide (all-from-out "emitter.rkt"))
+
+(define mode-direct #x000000)
+(define mode-pc-relative #x002000)
+(define mode-base #x004000)
+
+(define literal-mode #x010000)
+(define indirect-mode #x020000)
+(define simple-mode #x030000)
+
+(provide mode-direct mode-pc-relative mode-base
+         literal-mode indirect-mode simple-mode)
+
+(provide assemble-file)
+(provide print-file-listing)
+
 (define base-addr #f)
 
 ;; Word (as integer) to bytes
@@ -103,6 +121,7 @@
              [location (dict-ref labels label #f)]
              [opcode (first line)])
         (if (and location
+                 (symbol? opcode)
                  (not (member (eval opcode) f2-opcodes)))
             (append (drop-right line 1)
                     (list (append label-modifier (list location))))
@@ -178,13 +197,7 @@
   (if (and (list? modifier)
            (member 'index modifier)) #x008000 #x000000))
 
-(define mode-direct #x000000)
-(define mode-pc-relative #x002000)
-(define mode-base #x004000)
 
-(define literal-mode #x010000)
-(define indirect-mode #x020000)
-(define simple-mode #x030000)
 
 (define (calculate-nixbpe-bits pc len base modifier operand)
   (let ([bp-mode (get-bp-mode pc len base modifier operand)]
@@ -352,6 +365,8 @@
                         mod-records)))
 
 (define (assemble-file in-filename out-filename)
+  
+  
   (with-output-to-file out-filename
     #:exists 'replace
     (lambda ()
@@ -430,3 +445,13 @@
             (print-listing (current-input-port)
                            (current-output-port)
                            in-text)))))))
+
+(module* main #f
+  (let ([in-filename (vector-ref (current-command-line-arguments) 0)]
+        [out-filename (vector-ref (current-command-line-arguments) 1)])
+    (display "Output file: ")
+    (display out-filename)
+    (display "\n")
+    
+    (assemble-file in-filename out-filename))
+  )
