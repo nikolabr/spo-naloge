@@ -385,15 +385,16 @@
   (display (~r (car l) #:base 16 #:min-width 6 #:pad-string "0") o)
   (display " " o)
   (display (apply string-append
-                (map (lambda (i)
-                       (~r i #:base 16 #:min-width 2 #:pad-string "0"))
-                     (bytes->list (cdr l)))) o)
-  (display " " o)
+                  (map (lambda (i)
+                         (~r i #:base 16 #:min-width 2 #:pad-string "0"))
+                       (bytes->list (cdr l)))) o)
+  (display "\n" o)
   ;; (let ([m (assoc (car l) lines)])
   ;;   (if m
   ;;       (display (list-ref text (cdr m)) o)
   ;;       #f))
   (map (lambda (i)
+         (display "\t")
          (display (list-ref text (cdr i)))
          (display "\n"))
        (filter
@@ -423,7 +424,7 @@
     (map (lambda (i) (display-listing i o line-location text))
          (append code variables)))
   #t)
-
+        
 (define (read-port-lines)
   (let ([l (read-line)])
     (if (equal? l eof)
