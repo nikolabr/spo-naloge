@@ -19,6 +19,16 @@
 (provide mode-direct mode-pc-relative mode-base
          literal-mode indirect-mode simple-mode)
 
+(define reg-a 0)
+(define reg-x 1)
+(define reg-l 2)
+(define reg-b 3)
+(define reg-s 4)
+(define reg-t 5)
+(define reg-f 6)
+
+(provide reg-a reg-x reg-l reg-b reg-s reg-t reg-f)
+
 (provide assemble-file)
 (provide print-file-listing)
 
@@ -213,13 +223,7 @@
      e
      x)))
 
-(define reg-a 0)
-(define reg-x 1)
-(define reg-l 2)
-(define reg-b 3)
-(define reg-s 4)
-(define reg-t 5)
-(define reg-f 6)
+
 
 (define (generate-f2 opcode operands)
   (let* ([to-symbol (lambda (n) (eval (string->symbol
