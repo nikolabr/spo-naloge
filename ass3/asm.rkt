@@ -132,8 +132,8 @@
              [location (dict-ref labels label #f)]
              [opcode (first line)])
         (if (and location
-                 (symbol? opcode)
-                 (not (member (eval opcode) f2-opcodes))
+                 (not (and (symbol? opcode)
+                           (member (eval opcode) f2-opcodes)))
                  (not (member "EQU" line)))
             (append (drop-right line 1)
                     (list (append label-modifier (list location))))
@@ -357,22 +357,24 @@
          [resolved (second-pass labels lines)]
          [code (generate-code resolved)]
          [variables (generate-variables lines)]
-         [mod-records (generate-mod-records resolved)])
+         [mod-records (generate-mod-records resolved)]
+         [start-addr (last (first (filter (lambda (i) (and (> (length i) 1) (equal? (second i) "START")))
+                                          resolved)))]
+         [end-addr (last (last (first (filter (lambda (i) (and (> (length i) 1) (equal? (first i) "END")))
+                                         resolved))))])
     (create-object-file o
-                        ""
-                        0
+                        (car (first labels))
+                        start-addr
                         (max (car (last code))
                              (if (empty? variables)
                                  0
                                  (car (last variables))))
-                        0
+                        end-addr
                         (append code
                                 variables)
                         mod-records)))
 
 (define (assemble-file in-filename out-filename)
-  
-  
   (with-output-to-file out-filename
     #:exists 'replace
     (lambda ()
