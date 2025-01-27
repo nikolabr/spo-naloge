@@ -94,7 +94,8 @@
       (instr-length (remove-label l) prev)))
 
 (define (first-pass/process-line l res)
-  (if (empty? l)
+  (if (or (empty? l)
+          (member "EQU" l))
       res
       (let* ([prev (last res)]
              [is-label (starts-with-label l)]
@@ -122,7 +123,8 @@
              [opcode (first line)])
         (if (and location
                  (symbol? opcode)
-                 (not (member (eval opcode) f2-opcodes)))
+                 (not (member (eval opcode) f2-opcodes))
+                 (not (member "EQU" line)))
             (append (drop-right line 1)
                     (list (append label-modifier (list location))))
             line))))
